@@ -1824,7 +1824,11 @@ service cloud.firestore {
         && incoming().status == 'pending'
         && !('resolvedBy' in incoming())
         && incoming().createdAt == request.time
-        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+        && (
+          exists(/databases/$(database)/documents/events/$(incoming().eventId))
+          || exists(/databases/$(database)/documents/groups/$(incoming().eventId))
+          || incoming().eventId == 'default-secret-santa-2026'
+        );
       allow update: if isValidId(requestId)
         && isValidRecoveryRequest(incoming())
         && isAdmin()

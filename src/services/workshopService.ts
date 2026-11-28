@@ -1832,53 +1832,64 @@ export async function submitSessionRecoveryRequest(params: {
   eventId: string;
   requestedName: string;
   verificationHint: string;
-  liveMode: boolean;
+  liveMode?: boolean;
 }): Promise<{ ok: boolean; message: string }> {
+  const cleanEventId =
+    params.eventId && /^[a-zA-Z0-9_-]{1,128}$/.test(params.eventId.trim())
+      ? params.eventId.trim()
+      : 'default-secret-santa-2026';
   const cleanName = params.requestedName.trim().slice(0, 100);
   const cleanHint = params.verificationHint.trim().slice(0, 240);
   if (!cleanName) {
     return { ok: false, message: 'Please enter the name you used when joining Secret Santa.' };
   }
 
-  let requestId = `rec_${Date.now()}_${generateSecureTokenHex(4)}`;
+  let requestId = `rec_${Date.now()}_${generateSecureTokenHex(6)}`;
   let genericMessage =
-    "If we find a matching participant on Santa's list, the organizer will verify your details and send a one-time 24-hour recovery link directly to you.";
+    "Your request has been sent to the event organizer. Once they verify your identity, they'll send you a fresh one-time 24-hour recovery link.";
 
   try {
     const res = await fetch('/api/workshop/recovery-request', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        eventId: params.eventId,
+        eventId: cleanEventId,
         requestedName: cleanName,
         verificationHint: cleanHint,
       }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       return {
         ok: false,
-        message: data.message || data.error || 'Please try again in a few minutes.',
+        message: data.message || data.error || 'Please wait a few minutes before trying again.',
       };
     }
-    if (data.requestId) requestId = String(data.requestId);
-    if (data.message) genericMessage = String(data.message);
+    if (typeof data.requestId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(data.requestId)) {
+      requestId = data.requestId;
+    }
+    if (typeof data.message === 'string' && data.message.trim()) {
+      genericMessage = data.message.trim();
+    }
   } catch {
-    // Proceed cleanly even if backend endpoint unavailable
+    // Backend rate-limit helper unavailable; proceed directly to Firestore persistence
   }
 
-  if (params.liveMode) {
-    try {
-      await setDoc(doc(db, 'recoveryRequests', requestId), {
-        eventId: params.eventId,
-        requestedName: cleanName,
-        verificationHint: cleanHint,
-        status: 'pending',
-        createdAt: serverTimestamp(),
-      });
-    } catch {
-      // Never leak existence or backend error details to unauthenticated caller
-    }
+  try {
+    await setDoc(doc(db, 'recoveryRequests', requestId), {
+      eventId: cleanEventId,
+      requestedName: cleanName,
+      verificationHint: cleanHint,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('Session recovery request write failed:', err);
+    return {
+      ok: false,
+      message:
+        'We could not deliver your recovery request right now. Please check your internet connection and try again, or contact your organizer directly.',
+    };
   }
 
   return { ok: true, message: genericMessage };

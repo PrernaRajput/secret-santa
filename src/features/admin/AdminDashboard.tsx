@@ -43,6 +43,7 @@ import {
   adminCorrectDeliveryAcknowledgment,
   checkIsAuthorizedAdmin,
   clearAllParticipantsAndMatches,
+  deleteRecoveryRequest,
   dismissRecoveryRequest,
   generatePersonalInvitation,
   issueRecoveryInvitation,
@@ -59,6 +60,7 @@ import {
   runCryptographicMatching,
   saveAdminEventConfig,
   seedFestiveParticipants,
+  subscribeToRecoveryRequests,
 } from '../../services/secretSantaService';
 import {
   AdminAccount,
@@ -190,6 +192,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [recoveryReasonNote, setRecoveryReasonNote] = useState('');
   const [lastRecoveryLink, setLastRecoveryLink] = useState<string | null>(null);
   const [copiedRecoveryLink, setCopiedRecoveryLink] = useState(false);
+  const [recoveryScope, setRecoveryScope] = useState<'ALL' | 'ACTIVE'>('ALL');
+  const [recoveryStatusFilter, setRecoveryStatusFilter] = useState<'all' | 'pending' | 'closed'>('all');
+  const [perRequestTargetIds, setPerRequestTargetIds] = useState<Record<string, string>>({});
+  const [issuedLinksByRequestId, setIssuedLinksByRequestId] = useState<Record<string, string>>({});
+  const [copiedRequestLinkId, setCopiedRequestLinkId] = useState<string | null>(null);
+  const [recoveryLoadError, setRecoveryLoadError] = useState<string | null>(null);
   const [adminAccounts, setAdminAccounts] = useState<AdminAccount[]>([]);
   const [newCoAdminEmail, setNewCoAdminEmail] = useState('');
   const [newCoAdminName, setNewCoAdminName] = useState('');
@@ -248,7 +256,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         listInvitations(activeEventId),
         listParticipants(activeEventId),
         listAdminAccounts(),
-        listRecoveryRequests(activeEventId).catch(() => []),
+        listRecoveryRequests(recoveryScope === 'ALL' ? 'ALL' : activeEventId),
         listDeliveryAcknowledgmentsAdmin(activeEventId).catch(() => []),
         listRecoveryAuditLogs(activeEventId).catch(() => []),
       ]);
@@ -256,16 +264,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setParticipants(parts);
       setAdminAccounts(admins);
       setRecoveryRequests(recReqs);
+      setRecoveryLoadError(null);
       setDeliveryAcks(acks);
       setAuditLogs(audits);
     } catch (err) {
       reportError(err, 'Unable to load organizer data from Firestore.');
     }
-  }, [activeEventId, isAuthorizedAdmin, reportError]);
+  }, [activeEventId, isAuthorizedAdmin, recoveryScope, reportError]);
 
   useEffect(() => {
     void loadAdminLists();
   }, [loadAdminLists]);
+
+  // Real-time Session Recovery Requests listener so incoming guest requests appear immediately
+  useEffect(() => {
+    if (!isAuthorizedAdmin) return;
+    const scope = recoveryScope === 'ALL' ? 'ALL' : activeEventId;
+    const unsub = subscribeToRecoveryRequests(
+      scope,
+      (items) => {
+        setRecoveryRequests(items);
+        setRecoveryLoadError(null);
+      },
+      (err) => {
+        const formatted = formatFriendlyFirestoreError(
+          err,
+          'Could not subscribe to Session Recovery Requests.'
+        );
+        setRecoveryLoadError(formatted.message);
+      }
+    );
+    return () => unsub();
+  }, [activeEventId, isAuthorizedAdmin, recoveryScope]);
 
   // Keep event form synced when switching active groups
   useEffect(() => {
@@ -351,6 +381,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const findSmartParticipantMatch = useCallback(
+    (requestedName: string): ParticipantProfile | undefined => {
+      const clean = requestedName.trim().toLowerCase();
+      if (!clean) return undefined;
+      const exact = participants.find((p) => p.name.trim().toLowerCase() === clean);
+      if (exact) return exact;
+      const partialMatches = participants.filter((p) => {
+        const pName = p.name.trim().toLowerCase();
+        return pName.includes(clean) || clean.includes(pName);
+      });
+      return partialMatches.length === 1 ? partialMatches[0] : undefined;
+    },
+    [participants]
+  );
+
   const handleIssueRecoveryLink = async (
     targetParticipantId: string,
     recoveryRequestId?: string
@@ -365,13 +410,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStatusMsg(null);
     try {
       const res = await issueRecoveryInvitation({
-        eventId: activeEventId,
+        eventId: target.eventId || activeEventId,
         targetParticipant: target,
         actorEmail: adminUser.email || 'admin',
         reasonNote: recoveryReasonNote || 'Organizer verified participant out-of-band.',
         recoveryRequestId,
       });
       setLastRecoveryLink(res.inviteUrl);
+      if (recoveryRequestId) {
+        setIssuedLinksByRequestId((prev) => ({ ...prev, [recoveryRequestId]: res.inviteUrl }));
+      }
       setRecoveryReasonNote('');
       await loadAdminLists();
       playChimeSound();
@@ -393,14 +441,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       await dismissRecoveryRequest(
         req.id,
-        activeEventId,
+        req.eventId || activeEventId,
         adminUser.email || 'admin',
         req.requestedName
       );
       await loadAdminLists();
       playPopSound();
+      setStatusMsg({
+        type: 'ok',
+        text: `Dismissed recovery request for "${req.requestedName}".`,
+      });
     } catch (err) {
       reportError(err, 'Could not dismiss recovery request.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteRecoveryRequest = async (req: SessionRecoveryRequestRecord) => {
+    if (!adminUser) return;
+    setBusy(true);
+    setStatusMsg(null);
+    try {
+      await deleteRecoveryRequest(req.id);
+      setIssuedLinksByRequestId((prev) => {
+        const next = { ...prev };
+        delete next[req.id];
+        return next;
+      });
+      await loadAdminLists();
+      playPopSound();
+    } catch (err) {
+      reportError(err, 'Could not delete recovery request.');
     } finally {
       setBusy(false);
     }
@@ -1780,82 +1852,255 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 {/* Incoming Recovery Requests Queue */}
-                <div className="space-y-2.5">
-                  <h4 className="font-display font-bold text-sm text-slate-900">
-                    Session Recovery Requests ({recoveryRequests.length})
-                  </h4>
-                  {recoveryRequests.length === 0 ? (
-                    <p className="text-xs text-slate-500 rounded-xl border border-slate-200 p-4 text-center">
-                      No participant recovery requests right now.
-                    </p>
-                  ) : (
-                    recoveryRequests.map((req) => {
-                      const autoMatch = participants.find(
-                        (p) => p.name.trim().toLowerCase() === req.requestedName.trim().toLowerCase()
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-display font-bold text-sm text-slate-900">
+                        Session Recovery Requests ({recoveryRequests.length})
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Updates live when guests click &ldquo;Lost your invitation?&rdquo;. Pick a
+                        participant on any pending row to issue their 24h recovery link.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setRecoveryScope('ALL')}
+                          className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                            recoveryScope === 'ALL'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          All Groups
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRecoveryScope('ACTIVE')}
+                          className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                            recoveryScope === 'ACTIVE'
+                              ? 'bg-white text-slate-900 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          This Group
+                        </button>
+                      </div>
+
+                      <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-semibold">
+                        {(
+                          [
+                            { id: 'all', label: 'All' },
+                            { id: 'pending', label: 'Pending' },
+                            { id: 'closed', label: 'Closed' },
+                          ] as const
+                        ).map((f) => (
+                          <button
+                            key={f.id}
+                            type="button"
+                            onClick={() => setRecoveryStatusFilter(f.id)}
+                            className={`px-2.5 py-1 rounded-md cursor-pointer transition-colors ${
+                              recoveryStatusFilter === f.id
+                                ? 'bg-white text-slate-900 shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {recoveryLoadError && (
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs font-semibold text-rose-800 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                      <span>{recoveryLoadError}</span>
+                    </div>
+                  )}
+
+                  {(() => {
+                    const filteredRequests = recoveryRequests.filter((r) => {
+                      if (recoveryStatusFilter === 'pending') return r.status === 'pending';
+                      if (recoveryStatusFilter === 'closed') return r.status !== 'pending';
+                      return true;
+                    });
+
+                    if (filteredRequests.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-500 rounded-xl border border-slate-200 p-4 text-center">
+                          {recoveryStatusFilter === 'pending'
+                            ? 'No pending recovery requests right now.'
+                            : 'No participant recovery requests right now.'}
+                        </p>
                       );
-                      const resolvedTargetId = recoveryTargetParticipantId || autoMatch?.id || '';
-                      const resolvedTargetLabel = recoveryTargetParticipantId
-                        ? participants.find((p) => p.id === recoveryTargetParticipantId)?.name ||
-                          'Selected Guest'
-                        : autoMatch?.name || 'Select guest above';
+                    }
+
+                    return filteredRequests.map((req) => {
+                      const smartMatch = findSmartParticipantMatch(req.requestedName);
+                      const chosenTargetId =
+                        perRequestTargetIds[req.id] !== undefined
+                          ? perRequestTargetIds[req.id]
+                          : smartMatch?.id || '';
+                      const chosenParticipant = participants.find((p) => p.id === chosenTargetId);
+                      const inlineIssuedUrl = issuedLinksByRequestId[req.id];
+                      const isOtherCustomGroup =
+                        req.eventId !== activeEventId && req.eventId !== DEFAULT_EVENT_ID;
+
                       return (
                         <div
                           key={req.id}
-                          className="rounded-2xl border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3"
+                          className={`rounded-2xl border p-3.5 space-y-2.5 ${
+                            req.status === 'pending'
+                              ? 'border-amber-200 bg-amber-50/30'
+                              : 'border-slate-200 bg-white'
+                          }`}
                         >
-                          <div className="space-y-0.5 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-sm text-slate-900">
-                                {req.requestedName}
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-semibold text-sm text-slate-900">
+                                  {req.requestedName}
+                                </p>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                    req.status === 'pending'
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : req.status === 'resolved'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : 'bg-slate-100 text-slate-600'
+                                  }`}
+                                >
+                                  {req.status}
+                                </span>
+                                {req.eventId !== activeEventId && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    {req.eventId === DEFAULT_EVENT_ID
+                                      ? 'Main Landing Portal'
+                                      : `Group: ${req.eventId}`}
+                                  </span>
+                                )}
+                              </div>
+                              {req.verificationHint && (
+                                <p className="text-xs text-slate-700">
+                                  Hint: {req.verificationHint}
+                                </p>
+                              )}
+                              <p className="text-[11px] text-slate-400">
+                                Filed {req.createdAt.toLocaleString()}
+                                {req.resolvedBy ? ` · Handled by ${req.resolvedBy}` : ''}
                               </p>
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                  req.status === 'pending'
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : req.status === 'resolved'
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : 'bg-slate-100 text-slate-600'
-                                }`}
-                              >
-                                {req.status}
-                              </span>
                             </div>
-                            {req.verificationHint && (
-                              <p className="text-xs text-slate-600">Hint: {req.verificationHint}</p>
+
+                            {req.status !== 'pending' && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void handleDeleteRecoveryRequest(req)}
+                                title="Delete request from queue"
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-rose-700 hover:bg-rose-50 inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                Delete
+                              </button>
                             )}
-                            <p className="text-[11px] text-slate-400">
-                              {req.createdAt.toLocaleString()}
-                            </p>
                           </div>
 
                           {req.status === 'pending' && (
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-200/60">
+                              {isOtherCustomGroup && onSelectActiveGroup && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectActiveGroup(req.eventId)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-900 text-xs font-semibold cursor-pointer"
+                                >
+                                  Switch to {req.eventId}
+                                </button>
+                              )}
+
+                              {participants.length === 0 ? (
+                                <span className="text-xs text-amber-800 font-medium">
+                                  No joined participants in &ldquo;{event.name}&rdquo; yet — switch
+                                  to the participant&apos;s group to issue their link.
+                                </span>
+                              ) : (
+                                <select
+                                  aria-label={`Select participant for ${req.requestedName}`}
+                                  value={chosenTargetId}
+                                  onChange={(e) =>
+                                    setPerRequestTargetIds((prev) => ({
+                                      ...prev,
+                                      [req.id]: e.target.value,
+                                    }))
+                                  }
+                                  className="min-h-[36px] rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800 max-w-xs"
+                                >
+                                  <option value="">Match to participant in {event.name}...</option>
+                                  {participants.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name} ({p.address.city || 'Guest'})
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+
                               <button
                                 type="button"
-                                disabled={busy || !resolvedTargetId}
-                                onClick={() =>
-                                  void handleIssueRecoveryLink(resolvedTargetId, req.id)
-                                }
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-semibold cursor-pointer"
+                                disabled={busy || !chosenTargetId}
+                                onClick={() => void handleIssueRecoveryLink(chosenTargetId, req.id)}
+                                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-semibold cursor-pointer"
                               >
-                                {resolvedTargetId
-                                  ? `Issue Link to ${resolvedTargetLabel}`
-                                  : 'Select Guest Above First'}
+                                {chosenParticipant
+                                  ? `Issue 24h Link to ${chosenParticipant.name}`
+                                  : 'Choose Participant to Issue Link'}
                               </button>
+
                               <button
                                 type="button"
                                 disabled={busy}
                                 onClick={() => void handleDismissRecoveryRequest(req)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                                className="min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
                               >
                                 Dismiss
                               </button>
                             </div>
                           )}
+
+                          {inlineIssuedUrl && (
+                            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 space-y-1.5">
+                              <p className="text-[11px] font-bold text-emerald-900">
+                                24-hour recovery link ready — send directly to {req.requestedName}:
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <code className="flex-1 text-[11px] bg-white border border-emerald-200 rounded-lg px-2 py-1.5 break-all text-slate-800">
+                                  {inlineIssuedUrl}
+                                </code>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await navigator.clipboard.writeText(inlineIssuedUrl);
+                                    setCopiedRequestLinkId(req.id);
+                                    window.setTimeout(() => setCopiedRequestLinkId(null), 2200);
+                                  }}
+                                  className="min-h-[32px] px-3 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                                >
+                                  {copiedRequestLinkId === req.id ? (
+                                    <Check className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                  {copiedRequestLinkId === req.id ? 'Copied' : 'Copy'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
-                    })
-                  )}
+                    });
+                  })()}
                 </div>
 
                 {/* Delivery Acknowledgments & Problem Reports */}

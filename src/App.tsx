@@ -340,39 +340,96 @@ export default function App() {
         return;
       }
 
-      // Personal invitation link (/join?token=... or /?token=...)
-      setHasPersonalToken(true);
-      const claim = await validateAndClaimInvitation(parsed.token);
-      if (claim.ok && claim.participantKey && claim.tokenHash) {
-        const targetGroupId = claim.eventId || DEFAULT_EVENT_ID;
-        setActiveGroupId(targetGroupId);
-        setParticipantKey(claim.participantKey);
-        setInvitationHash(claim.tokenHash);
-        setInviteLabel(claim.label);
-        setInviteError(null);
-        try {
-          window.sessionStorage.setItem(groupSessionKeyStore(targetGroupId), claim.participantKey);
-        } catch {
-          // ignore
-        }
-        if (claim.isRecovery) {
+      // Personal invitation or 24-hour recovery link (/join?token=... or /?token=...)
+      try {
+        const claim = await validateAndClaimInvitation(parsed.token);
+        if (claim.ok && claim.participantKey && claim.tokenHash) {
+          const targetGroupId = claim.eventId || DEFAULT_EVENT_ID;
+          setHasPersonalToken(true);
+          setActiveGroupId(targetGroupId);
+          setParticipantKey(claim.participantKey);
+          setInvitationHash(claim.tokenHash);
+          setInviteLabel(claim.label);
+          setInviteError(null);
           try {
-            const restored = await fetchParticipantProfile(claim.participantKey);
-            if (restored) {
-              setParticipant(restored);
-              setSelectedAvatarId(restored.avatarId);
-              setGenderFilter(restored.genderPreference);
-              setTheme(restored.selectedTheme);
-              if (restored.hasJoined) {
-                setStep('hub');
-              }
-            }
+            window.sessionStorage.setItem(groupSessionKeyStore(targetGroupId), claim.participantKey);
           } catch {
-            // Fall through to invitation screen if profile lookup fails
+            // ignore
           }
+          if (claim.isRecovery) {
+            try {
+              const restored = await fetchParticipantProfile(claim.participantKey);
+              if (restored) {
+                setParticipant(restored);
+                setSelectedAvatarId(restored.avatarId);
+                setGenderFilter(restored.genderPreference);
+                setTheme(restored.selectedTheme);
+                setInvitationHash(restored.invitationHash || claim.tokenHash);
+                try {
+                  window.sessionStorage.setItem(
+                    groupDraftStore(targetGroupId),
+                    JSON.stringify(restored)
+                  );
+                } catch {
+                  // ignore
+                }
+                const [restoredGroup, restoredEvent] = await Promise.all([
+                  fetchSantaGroup(targetGroupId).catch(() => null),
+                  fetchEvent(targetGroupId).catch(() => null),
+                ]);
+                const fallbackTemplate = buildDefaultEventTemplate();
+                const updatedSaved = saveParticipantGroupSession({
+                  groupId: targetGroupId,
+                  slug: restoredGroup?.slug || targetGroupId,
+                  name: restoredGroup?.name || restoredEvent?.name || 'Secret Santa',
+                  theme: restoredGroup?.theme || restored.selectedTheme,
+                  status:
+                    restoredGroup?.status ||
+                    (restoredEvent?.isMatched
+                      ? 'MATCHED'
+                      : restoredEvent?.registrationOpen === false
+                        ? 'REGISTRATION_CLOSED'
+                        : 'REGISTRATION_OPEN'),
+                  participantKey: restored.id,
+                  participantName: restored.name,
+                  avatarId: restored.avatarId,
+                  isMatched: Boolean(restoredGroup?.isMatched ?? restoredEvent?.isMatched),
+                  recipientRevealAt:
+                    restoredGroup?.recipientRevealAt ||
+                    restoredEvent?.gifteeRevealAt ||
+                    fallbackTemplate.gifteeRevealAt,
+                  senderRevealAt:
+                    restoredGroup?.senderRevealAt ||
+                    restoredEvent?.santaIdentityRevealAt ||
+                    null,
+                  joinedAt: new Date(),
+                });
+                setSavedGroups(updatedSaved);
+                if (restored.hasJoined) {
+                  setStep('hub');
+                }
+              } else {
+                setHasPersonalToken(false);
+                setInviteError(
+                  'We found your recovery link, but your participant profile could not be loaded. Please contact your organizer.'
+                );
+              }
+            } catch {
+              setHasPersonalToken(false);
+              setInviteError(
+                'Could not restore your profile from this recovery link. Please try refreshing or contact your organizer.'
+              );
+            }
+          }
+        } else {
+          setHasPersonalToken(false);
+          setInviteError(claim.reason || 'Could not validate your invitation link.');
         }
-      } else {
-        setInviteError(claim.reason || 'Could not validate your invitation link.');
+      } catch {
+        setHasPersonalToken(false);
+        setInviteError(
+          'Could not verify this invitation or recovery link right now. Please check your connection or request a fresh recovery link below.'
+        );
       }
     },
     []

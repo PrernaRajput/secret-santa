@@ -366,6 +366,8 @@ export async function issueRecoveryInvitation(params: {
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours short-lived
   const auditId = `audit_${Date.now()}_${generateSecureTokenHex(4)}`;
 
+  const targetEventId = params.targetParticipant.eventId || params.eventId;
+
   try {
     const batch = writeBatch(db);
 
@@ -382,7 +384,7 @@ export async function issueRecoveryInvitation(params: {
     }
 
     batch.set(doc(db, 'invitations', tokenHash), {
-      eventId: params.eventId,
+      eventId: targetEventId,
       label: `Recovery: ${params.targetParticipant.name}`.slice(0, 100),
       status: 'pending',
       participantKey: '',
@@ -401,7 +403,7 @@ export async function issueRecoveryInvitation(params: {
     }
 
     batch.set(doc(db, 'recoveryAuditLogs', auditId), {
-      eventId: params.eventId,
+      eventId: targetEventId,
       action: 'recovery_issued',
       actorEmail: params.actorEmail.slice(0, 160),
       targetLabel: params.targetParticipant.name.slice(0, 120),
@@ -1199,29 +1201,60 @@ export async function fetchMySecretSantaIdentity(
 
 // ---------- Admin Recovery, Delivery Problems & Audit Logs ----------
 
+function mapRecoveryRequestDoc(
+  id: string,
+  data: Record<string, unknown>
+): SessionRecoveryRequestRecord {
+  return {
+    id,
+    eventId: String(data.eventId || DEFAULT_EVENT_ID),
+    requestedName: String(data.requestedName || ''),
+    verificationHint: String(data.verificationHint || ''),
+    status: (data.status as SessionRecoveryRequestRecord['status']) || 'pending',
+    resolvedBy: data.resolvedBy ? String(data.resolvedBy) : undefined,
+    createdAt: toDateSafe(data.createdAt, new Date()),
+  };
+}
+
 export async function listRecoveryRequests(
-  eventId = DEFAULT_EVENT_ID
+  eventId: string | 'ALL' = DEFAULT_EVENT_ID
 ): Promise<SessionRecoveryRequestRecord[]> {
   try {
-    const q = query(collection(db, 'recoveryRequests'), where('eventId', '==', eventId));
+    const q =
+      eventId === 'ALL'
+        ? query(collection(db, 'recoveryRequests'))
+        : query(collection(db, 'recoveryRequests'), where('eventId', '==', eventId));
     const snap = await getDocs(q);
     return snap.docs
-      .map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          eventId: String(data.eventId),
-          requestedName: String(data.requestedName || ''),
-          verificationHint: String(data.verificationHint || ''),
-          status: (data.status as SessionRecoveryRequestRecord['status']) || 'pending',
-          resolvedBy: data.resolvedBy ? String(data.resolvedBy) : undefined,
-          createdAt: toDateSafe(data.createdAt, new Date()),
-        };
-      })
+      .map((d) => mapRecoveryRequestDoc(d.id, d.data() as Record<string, unknown>))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'recoveryRequests');
   }
+}
+
+export function subscribeToRecoveryRequests(
+  eventId: string | 'ALL',
+  onUpdate: (items: SessionRecoveryRequestRecord[]) => void,
+  onError?: (err: unknown) => void
+): () => void {
+  const q =
+    eventId === 'ALL'
+      ? query(collection(db, 'recoveryRequests'))
+      : query(collection(db, 'recoveryRequests'), where('eventId', '==', eventId));
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items = snap.docs
+        .map((d) => mapRecoveryRequestDoc(d.id, d.data() as Record<string, unknown>))
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      onUpdate(items);
+    },
+    (err) => {
+      if (onError) onError(err);
+    }
+  );
 }
 
 export async function dismissRecoveryRequest(
@@ -1248,6 +1281,14 @@ export async function dismissRecoveryRequest(
     await batch.commit();
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `recoveryRequests/${requestId}`);
+  }
+}
+
+export async function deleteRecoveryRequest(requestId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'recoveryRequests', requestId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `recoveryRequests/${requestId}`);
   }
 }
 

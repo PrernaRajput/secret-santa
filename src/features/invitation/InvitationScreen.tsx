@@ -244,7 +244,20 @@ export const InvitationScreen: React.FC<InvitationScreenProps> = ({
         {inviteError && (
           <div className="mt-5 w-full rounded-2xl bg-rose-950/80 border border-rose-500/40 px-4 py-3 text-sm text-rose-200 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
-            <p>{inviteError}</p>
+            <div className="space-y-1.5">
+              <p>{inviteError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  playPopSound();
+                  setShowRecoveryModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2 cursor-pointer"
+              >
+                <LifeBuoy className="w-3.5 h-3.5" />
+                Request a fresh 24-hour recovery link
+              </button>
+            </div>
           </div>
         )}
 
@@ -261,54 +274,56 @@ export const InvitationScreen: React.FC<InvitationScreenProps> = ({
             {phase === 'idle' ? 'Unwrap my invitation 🎁' : 'Opening your secret letter...'}
           </motion.button>
 
-          {!hasPersonalToken && (
-            <div className="text-center space-y-2.5">
-              {!showTokenInput ? (
-                <button
-                  type="button"
-                  onClick={() => setShowTokenInput(true)}
-                  className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-200 transition-colors cursor-pointer"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  Have a personal invitation link or token?
-                </button>
-              ) : (
-                <form
-                  onSubmit={handleManualSubmit}
-                  className="mt-2 flex flex-col sm:flex-row gap-2 bg-white/5 border border-white/10 rounded-2xl p-2"
-                >
-                  <input
-                    type="text"
-                    value={manualToken}
-                    onChange={(e) => setManualToken(e.target.value)}
-                    placeholder="Paste your invitation link or 64-char token..."
-                    className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder:text-stone-500 focus:outline-none"
-                  />
+          <div className="text-center space-y-2.5">
+            {(!hasPersonalToken || Boolean(inviteError)) && (
+              <>
+                {!showTokenInput ? (
                   <button
-                    type="submit"
-                    disabled={redeeming}
-                    className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                    type="button"
+                    onClick={() => setShowTokenInput(true)}
+                    className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-200 transition-colors cursor-pointer"
                   >
-                    {redeeming ? 'Checking...' : 'Redeem'}
+                    <KeyRound className="w-3.5 h-3.5" />
+                    Have a personal invitation or recovery link?
                   </button>
-                </form>
-              )}
+                ) : (
+                  <form
+                    onSubmit={handleManualSubmit}
+                    className="mt-2 flex flex-col sm:flex-row gap-2 bg-white/5 border border-white/10 rounded-2xl p-2"
+                  >
+                    <input
+                      type="text"
+                      value={manualToken}
+                      onChange={(e) => setManualToken(e.target.value)}
+                      placeholder="Paste your invitation/recovery link or 64-char token..."
+                      className="flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder:text-stone-500 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={redeeming}
+                      className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      {redeeming ? 'Checking...' : 'Redeem'}
+                    </button>
+                  </form>
+                )}
+              </>
+            )}
 
-              <div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    playPopSound();
-                    setShowRecoveryModal(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 text-xs text-amber-300/85 hover:text-amber-200 transition-colors cursor-pointer"
-                >
-                  <LifeBuoy className="w-3.5 h-3.5" />
-                  Lost your invitation or switched devices?
-                </button>
-              </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  playPopSound();
+                  setShowRecoveryModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 text-xs text-amber-300/85 hover:text-amber-200 transition-colors cursor-pointer"
+              >
+                <LifeBuoy className="w-3.5 h-3.5" />
+                Lost your invitation or switched devices?
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </main>
 

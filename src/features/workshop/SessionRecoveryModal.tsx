@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, KeyRound, ShieldCheck, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, KeyRound, ShieldCheck, X } from 'lucide-react';
 import { submitSessionRecoveryRequest } from '../../services/workshopService';
 
 interface SessionRecoveryModalProps {
   open: boolean;
   eventId: string;
-  liveMode: boolean;
+  liveMode?: boolean;
   onClose: () => void;
 }
 
@@ -21,6 +21,29 @@ export const SessionRecoveryModal: React.FC<SessionRecoveryModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Reset form & previous confirmation whenever the dialog closes so guests can file a fresh request cleanly
+  useEffect(() => {
+    if (!open) {
+      setRequestedName('');
+      setVerificationHint('');
+      setSubmitting(false);
+      setResultMsg(null);
+      setErrorMsg(null);
+    }
+  }, [open]);
+
+  // Close cleanly on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, submitting, onClose]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +74,9 @@ export const SessionRecoveryModal: React.FC<SessionRecoveryModalProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          onClick={() => {
+            if (!submitting) onClose();
+          }}
           className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
@@ -60,13 +86,15 @@ export const SessionRecoveryModal: React.FC<SessionRecoveryModalProps> = ({
             initial={{ scale: 0.92, y: 16 }}
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.94, opacity: 0 }}
+            onClick={(e) => e.stopPropagation()}
             className="w-full max-w-md rounded-3xl bg-[#fffdf7] border-2 border-amber-300 p-6 shadow-2xl relative space-y-4"
           >
             <button
               type="button"
+              disabled={submitting}
               onClick={onClose}
               aria-label="Close recovery dialog"
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-amber-100 hover:bg-amber-200 flex items-center justify-center text-amber-950 cursor-pointer"
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-amber-100 hover:bg-amber-200 flex items-center justify-center text-amber-950 cursor-pointer disabled:opacity-50"
             >
               <X className="w-4 h-4" />
             </button>
@@ -130,7 +158,7 @@ export const SessionRecoveryModal: React.FC<SessionRecoveryModalProps> = ({
                     htmlFor="recovery-hint"
                     className="block text-xs font-bold text-slate-800 mb-1"
                   >
-                    How should the organizer reach &amp; verify you? (e.g. WhatsApp / team / city)
+                    How should the organizer reach &amp; verify you? (e.g. group name, WhatsApp, or city)
                   </label>
                   <textarea
                     id="recovery-hint"
@@ -144,7 +172,10 @@ export const SessionRecoveryModal: React.FC<SessionRecoveryModalProps> = ({
                 </div>
 
                 {errorMsg && (
-                  <p className="text-xs font-semibold text-rose-700">{errorMsg}</p>
+                  <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-800 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{errorMsg}</span>
+                  </div>
                 )}
 
                 <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-600 flex items-center gap-2">
