@@ -1,0 +1,8 @@
+{
+  "name": "Secret Santa — Festive Gift Exchange",
+  "description": "A magical 3D-cartoon Secret Santa web app with Desi Santa loading screen, animated secret invitations, 20 avatars, hobby clues, Blinkit/Amazon/Zomato/Flipkart address import, runaway No button, three live themes, admin timers, and scratch-and-shake reveals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

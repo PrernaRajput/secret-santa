@@ -1,0 +1,467 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized event administrator record keyed by Firebase Auth UID or the 64-char SHA-256 hash of a lowercase organizer email.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 160 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "SecretSantaEvent": {
+      "title": "SecretSantaEvent",
+      "description": "Publicly readable event configuration, reveal schedule timers, budget guide, and Phase 2 Workshop feature gates.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "timezone": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "registrationOpen": { "type": "boolean" },
+        "registrationDeadline": { "type": "string", "format": "date-time" },
+        "gifteeRevealAt": { "type": "string", "format": "date-time" },
+        "giftDeadline": { "type": "string", "format": "date-time" },
+        "santaIdentityRevealAt": { "type": "string", "format": "date-time" },
+        "isMatched": { "type": "boolean" },
+        "matchedAt": { "type": "string", "format": "date-time" },
+        "participantCount": { "type": "integer" },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "budget": { "type": "object" },
+        "mailboxEnabled": { "type": "boolean" },
+        "mailboxOpenAt": { "type": "string", "format": "date-time" },
+        "mailboxCloseAt": { "type": "string", "format": "date-time" },
+        "guessingEnabled": { "type": "boolean" },
+        "maxGuesses": { "type": "integer" },
+        "allowDuplicateGuesses": { "type": "boolean" },
+        "adventEnabled": { "type": "boolean" },
+        "adventStartAt": { "type": "string", "format": "date-time" },
+        "adventEndAt": { "type": "string", "format": "date-time" },
+        "adventAllowCatchUp": { "type": "boolean" },
+        "wheelEnabled": { "type": "boolean" },
+        "elfChallengeEnabled": { "type": "boolean" },
+        "quizEnabled": { "type": "boolean" },
+        "quizAllowRetake": { "type": "boolean" },
+        "deliveryTrackingEnabled": { "type": "boolean" },
+        "allowSharedTrackingLink": { "type": "boolean" },
+        "thankYouEnabled": { "type": "boolean" },
+        "snowGlobeRevealEnabled": { "type": "boolean" },
+        "giftPreferencesCutoffAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "name",
+        "timezone",
+        "registrationOpen",
+        "registrationDeadline",
+        "gifteeRevealAt",
+        "giftDeadline",
+        "santaIdentityRevealAt",
+        "isMatched",
+        "participantCount",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "One-time invitation or recovery credential keyed by the 64-char SHA-256 hash of a 256-bit random token.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "label": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["pending", "claimed", "revoked"] },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "isRecovery": { "type": "boolean" },
+        "recoveryParticipantKey": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "claimedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "label", "status", "participantKey", "expiresAt", "createdAt", "updatedAt"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Secret Santa participant profile with delivery address, hobbies, avatar ID, and theme preference.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "invitationHash": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "address": { "type": "object" },
+        "hobbies": { "type": "array" },
+        "avatarId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "genderPreference": { "type": "string", "enum": ["all", "female", "male", "neutral"] },
+        "selectedTheme": { "type": "string", "enum": ["santa", "chocolate", "funny"] },
+        "hasJoined": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "eventId", "invitationHash", "name", "address", "hobbies",
+        "avatarId", "genderPreference", "selectedTheme", "hasJoined", "createdAt", "updatedAt"
+      ]
+    },
+    "EventRoster": {
+      "title": "EventRoster",
+      "description": "Sanitized non-PII public roster of event participants (publicId, display name, avatarId) used for Guess Your Santa without exposing participantKey or PII.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "entries": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "entries", "updatedAt"]
+    },
+    "MatchAssignment": {
+      "title": "MatchAssignment",
+      "description": "Time-locked giftee reveal document keyed by the giver's participantKey, readable only after event.gifteeRevealAt.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "giverKey": { "type": "string", "maxLength": 64 },
+        "outgoingAssignmentId": { "type": "string", "maxLength": 64 },
+        "recipientName": { "type": "string", "maxLength": 100 },
+        "recipientAvatarId": { "type": "string", "maxLength": 64 },
+        "recipientHobbies": { "type": "array" },
+        "recipientAddress": { "type": "object" },
+        "recipientDislikes": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "eventId", "giverKey", "recipientName", "recipientAvatarId",
+        "recipientHobbies", "recipientAddress", "createdAt", "updatedAt"
+      ]
+    },
+    "IncomingAssignment": {
+      "title": "IncomingAssignment",
+      "description": "Strictly anonymous handle keyed by recipientKey holding only the opaque incomingAssignmentId (never sender identity).",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientKey": { "type": "string", "maxLength": 64 },
+        "incomingAssignmentId": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "recipientKey", "incomingAssignmentId", "createdAt", "updatedAt"]
+    },
+    "SantaIdentityReveal": {
+      "title": "SantaIdentityReveal",
+      "description": "Time-locked Secret Santa identity reveal document keyed by recipientKey, readable strictly after event.santaIdentityRevealAt.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientKey": { "type": "string", "maxLength": 64 },
+        "santaPublicId": { "type": "string", "maxLength": 64 },
+        "santaName": { "type": "string", "maxLength": 100 },
+        "santaAvatarId": { "type": "string", "maxLength": 64 },
+        "santaHobbies": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "recipientKey", "santaName", "santaAvatarId", "santaHobbies", "createdAt", "updatedAt"]
+    },
+    "AnonymousConversation": {
+      "title": "AnonymousConversation",
+      "description": "Assignment-scoped anonymous mailbox metadata keyed by opaque assignmentId with zero sender identity fields.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "messageCount": { "type": "integer" },
+        "unreadForSanta": { "type": "integer" },
+        "unreadForRecipient": { "type": "integer" },
+        "lastSenderRole": { "type": "string", "enum": ["santa", "recipient"] },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "messageCount", "unreadForSanta", "unreadForRecipient", "updatedAt"]
+    },
+    "AnonymousMessage": {
+      "title": "AnonymousMessage",
+      "description": "Single anonymous message inside /anonymousConversations/{assignmentId}/messages.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 64 },
+        "senderRole": { "type": "string", "enum": ["santa", "recipient"] },
+        "body": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "readByOther": { "type": "boolean" },
+        "reported": { "type": "boolean" },
+        "reportReason": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "assignmentId", "senderRole", "body", "readByOther", "reported", "createdAt"]
+    },
+    "SantaGuess": {
+      "title": "SantaGuess",
+      "description": "Participant's Guess Your Santa case file (capped at event.maxGuesses, never stores correctness).",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "guesses": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "guesses", "updatedAt"]
+    },
+    "DeliveryProgress": {
+      "title": "DeliveryProgress",
+      "description": "Anonymous gift preparation and sleigh dispatch progress keyed by opaque assignmentId.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 64 },
+        "stage": { "type": "string", "enum": ["preparing", "shopping", "wrapped", "dispatched", "delivered"] },
+        "history": { "type": "array" },
+        "sharedNote": { "type": "string", "maxLength": 240 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "assignmentId", "stage", "history", "sharedNote", "updatedAt"]
+    },
+    "DeliveryPrivateTracking": {
+      "title": "DeliveryPrivateTracking",
+      "description": "Sender-only private courier and tracking reference keyed by giver's participantKey.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "courierName": { "type": "string", "maxLength": 80 },
+        "trackingCode": { "type": "string", "maxLength": 120 },
+        "privateNote": { "type": "string", "maxLength": 240 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "courierName", "trackingCode", "privateNote", "updatedAt"]
+    },
+    "DeliveryAcknowledgment": {
+      "title": "DeliveryAcknowledgment",
+      "description": "Recipient-owned physical delivery receipt confirmation keyed by opaque assignmentId.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["pending", "received", "problem"] },
+        "acknowledgedAt": { "type": "string", "format": "date-time" },
+        "problemSummary": { "type": "string", "maxLength": 300 },
+        "adminCorrectionNote": { "type": "string", "maxLength": 300 },
+        "correctedBy": { "type": "string", "maxLength": 160 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "assignmentId", "status", "problemSummary", "adminCorrectionNote", "correctedBy", "updatedAt"]
+    },
+    "AdventUnlock": {
+      "title": "AdventUnlock",
+      "description": "Idempotent per-participant Advent Calendar door unlock enforced by server request.time.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "day": { "type": "integer" },
+        "rewardKind": { "type": "string", "maxLength": 32 },
+        "collectibleId": { "type": "string", "maxLength": 64 },
+        "collectibleName": { "type": "string", "maxLength": 100 },
+        "collectibleEmoji": { "type": "string", "maxLength": 12 },
+        "unlockedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "day", "rewardKind", "collectibleId", "collectibleName", "collectibleEmoji", "unlockedAt"]
+    },
+    "DailyWheelSpin": {
+      "title": "DailyWheelSpin",
+      "description": "Idempotent once-per-day Santa's Wheel spin outcome keyed by {participantKey}_{YYYYMMDD}.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "dateKey": { "type": "string", "maxLength": 16 },
+        "prizeId": { "type": "string", "maxLength": 64 },
+        "slotIndex": { "type": "integer" },
+        "prizeLabel": { "type": "string", "maxLength": 100 },
+        "prizeMessage": { "type": "string", "maxLength": 240 },
+        "prizeEmoji": { "type": "string", "maxLength": 12 },
+        "collectibleId": { "type": "string", "maxLength": 64 },
+        "collectibleName": { "type": "string", "maxLength": 100 },
+        "spunAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "dateKey", "prizeId", "slotIndex", "prizeLabel", "prizeMessage", "prizeEmoji", "collectibleId", "collectibleName", "spunAt"]
+    },
+    "QuizResult": {
+      "title": "QuizResult",
+      "description": "Entertainment-only Naughty or Nice Meter personality quiz result.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "quizVersion": { "type": "string", "maxLength": 32 },
+        "nicePercent": { "type": "integer" },
+        "naughtyPercent": { "type": "integer" },
+        "verdictTitle": { "type": "string", "maxLength": 120 },
+        "verdictSubtitle": { "type": "string", "maxLength": 200 },
+        "stampLabel": { "type": "string", "maxLength": 40 },
+        "answers": { "type": "array" },
+        "completedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "quizVersion", "nicePercent", "naughtyPercent", "verdictTitle", "verdictSubtitle", "stampLabel", "answers", "completedAt"]
+    },
+    "ElfDiscovery": {
+      "title": "ElfDiscovery",
+      "description": "Idempotent daily Hidden Elf hunt discovery keyed by {participantKey}_{YYYYMMDD}.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "dateKey": { "type": "string", "maxLength": 16 },
+        "challengeId": { "type": "string", "maxLength": 80 },
+        "spotId": { "type": "string", "maxLength": 32 },
+        "rewardTitle": { "type": "string", "maxLength": 100 },
+        "rewardEmoji": { "type": "string", "maxLength": 12 },
+        "collectibleId": { "type": "string", "maxLength": 64 },
+        "discoveredAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "dateKey", "challengeId", "spotId", "rewardTitle", "rewardEmoji", "collectibleId", "discoveredAt"]
+    },
+    "GingerbreadDesign": {
+      "title": "GingerbreadDesign",
+      "description": "Structured gingerbread cookie customization state (no base64 images).",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "shape": { "type": "string", "enum": ["person", "tree", "star", "reindeer"] },
+        "icingColor": { "type": "string", "enum": ["white", "pink", "red", "green", "chocolate"] },
+        "decorations": { "type": "array" },
+        "isPublicProfileDecor": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "shape", "icingColor", "decorations", "isPublicProfileDecor", "updatedAt"]
+    },
+    "GiftPreferences": {
+      "title": "GiftPreferences",
+      "description": "Participant-controlled 'Things Santa Should Avoid' dislikes and optional dietary restrictions.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "dislikedCategories": { "type": "array" },
+        "dietaryRestrictions": { "type": "array" },
+        "dislikedColors": { "type": "array" },
+        "alreadyOwned": { "type": "array" },
+        "nonFoodNotes": { "type": "string", "maxLength": 240 },
+        "generalNotes": { "type": "string", "maxLength": 300 },
+        "shareWithSanta": { "type": "boolean" },
+        "shareDietaryWithSanta": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "eventId", "participantKey", "dislikedCategories", "dietaryRestrictions",
+        "dislikedColors", "alreadyOwned", "nonFoodNotes", "generalNotes",
+        "shareWithSanta", "shareDietaryWithSanta", "updatedAt"
+      ]
+    },
+    "SharedDislikes": {
+      "title": "SharedDislikes",
+      "description": "Assignment-scoped sanitized 'Things Santa Should Avoid' mirror allowing post-match pre-cutoff updates without exposing participant keys.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 64 },
+        "isShared": { "type": "boolean" },
+        "dislikedCategories": { "type": "array" },
+        "dietaryRestrictions": { "type": "array" },
+        "dislikedColors": { "type": "array" },
+        "alreadyOwned": { "type": "array" },
+        "nonFoodNotes": { "type": "string", "maxLength": 240 },
+        "generalNotes": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "eventId", "assignmentId", "isShared", "dislikedCategories", "dietaryRestrictions",
+        "dislikedColors", "alreadyOwned", "nonFoodNotes", "generalNotes", "updatedAt"
+      ]
+    },
+    "ThankYouCard": {
+      "title": "ThankYouCard",
+      "description": "Animated thank-you card routed anonymously to the gift sender via opaque assignmentId after delivery confirmation.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "assignmentId": { "type": "string", "maxLength": 64 },
+        "templateId": { "type": "string", "enum": ["santa-heart", "reindeer-hug", "snowman-wave", "gingerbread-dance", "choco-hearts"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "reactions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "assignmentId", "templateId", "message", "reactions", "createdAt"]
+    },
+    "SnowGlobeDecoration": {
+      "title": "SnowGlobeDecoration",
+      "description": "Persisted interactive Snow Globe ornament placements per participant.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "decorations": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "participantKey", "decorations", "updatedAt"]
+    },
+    "SessionRecoveryRequest": {
+      "title": "SessionRecoveryRequest",
+      "description": "Participant-submitted request for organizer out-of-band session recovery.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "requestedName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "verificationHint": { "type": "string", "maxLength": 240 },
+        "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] },
+        "resolvedBy": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "requestedName", "verificationHint", "status", "createdAt"]
+    },
+    "RecoveryAuditLog": {
+      "title": "RecoveryAuditLog",
+      "description": "Admin-only immutable audit log of session recovery issuances and acknowledgment corrections.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "enum": ["recovery_issued", "invite_revoked", "ack_corrected", "request_dismissed"] },
+        "actorEmail": { "type": "string", "maxLength": 160 },
+        "targetLabel": { "type": "string", "maxLength": 120 },
+        "note": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["eventId", "action", "actorEmail", "targetLabel", "note", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": { "schema": { "$ref": "#/entities/AdminUser" }, "description": "Authorized admin accounts verified against Firebase Auth." },
+    "/events/{eventId}": { "schema": { "$ref": "#/entities/SecretSantaEvent" }, "description": "Secret Santa event schedule, budget, and Workshop feature configuration." },
+    "/invitations/{tokenHash}": { "schema": { "$ref": "#/entities/Invitation" }, "description": "One-time invitation & short-lived recovery records keyed by SHA-256 hash." },
+    "/participants/{participantKey}": { "schema": { "$ref": "#/entities/Participant" }, "description": "Participant profile documents keyed by 256-bit capability hashes." },
+    "/eventRosters/{eventId}": { "schema": { "$ref": "#/entities/EventRoster" }, "description": "Non-PII public participant roster for Guess Your Santa." },
+    "/matches/{participantKey}": { "schema": { "$ref": "#/entities/MatchAssignment" }, "description": "Time-locked giftee reveal documents unlocked at event.gifteeRevealAt." },
+    "/incomingAssignments/{participantKey}": { "schema": { "$ref": "#/entities/IncomingAssignment" }, "description": "Anonymous incoming assignment handle (zero sender identity)." },
+    "/santaReveals/{participantKey}": { "schema": { "$ref": "#/entities/SantaIdentityReveal" }, "description": "Time-locked Secret Santa identity reveal documents unlocked strictly at event.santaIdentityRevealAt." },
+    "/anonymousConversations/{assignmentId}": { "schema": { "$ref": "#/entities/AnonymousConversation" }, "description": "Assignment-scoped anonymous mailbox metadata." },
+    "/anonymousConversations/{assignmentId}/messages/{messageId}": { "schema": { "$ref": "#/entities/AnonymousMessage" }, "description": "Anonymous Santa ↔ Recipient messages." },
+    "/santaGuesses/{participantKey}": { "schema": { "$ref": "#/entities/SantaGuess" }, "description": "Participant's 3-guess Detective Rudolph board records." },
+    "/deliveryProgress/{assignmentId}": { "schema": { "$ref": "#/entities/DeliveryProgress" }, "description": "Anonymous gift delivery checkpoints keyed by assignmentId." },
+    "/deliveryPrivateTracking/{participantKey}": { "schema": { "$ref": "#/entities/DeliveryPrivateTracking" }, "description": "Sender-only private courier tracking notes." },
+    "/deliveryAcknowledgments/{assignmentId}": { "schema": { "$ref": "#/entities/DeliveryAcknowledgment" }, "description": "Recipient-owned physical gift receipt confirmation." },
+    "/adventUnlocks/{unlockId}": { "schema": { "$ref": "#/entities/AdventUnlock" }, "description": "Server-date-enforced daily Advent door unlocks." },
+    "/dailyWheelSpins/{spinId}": { "schema": { "$ref": "#/entities/DailyWheelSpin" }, "description": "Once-per-day Santa's Wheel spin rewards." },
+    "/quizResults/{participantKey}": { "schema": { "$ref": "#/entities/QuizResult" }, "description": "Entertainment-only Naughty or Nice Meter results." },
+    "/elfDiscoveries/{discoveryId}": { "schema": { "$ref": "#/entities/ElfDiscovery" }, "description": "Once-per-day Hidden Elf hunt discoveries." },
+    "/gingerbreadDesigns/{participantKey}": { "schema": { "$ref": "#/entities/GingerbreadDesign" }, "description": "Structured Gingerbread Studio designs." },
+    "/giftPreferences/{participantKey}": { "schema": { "$ref": "#/entities/GiftPreferences" }, "description": "Participant dislikes & dietary restrictions with explicit sharing controls." },
+    "/sharedDislikes/{assignmentId}": { "schema": { "$ref": "#/entities/SharedDislikes" }, "description": "Anonymous assignment-scoped sanitized mirror of shared dislikes synced before cutoff." },
+    "/thankYouCards/{assignmentId}": { "schema": { "$ref": "#/entities/ThankYouCard" }, "description": "Anonymous animated thank-you cards routed via assignmentId." },
+    "/snowGlobeDecorations/{participantKey}": { "schema": { "$ref": "#/entities/SnowGlobeDecoration" }, "description": "Persisted Snow Globe ornament placements." },
+    "/recoveryRequests/{requestId}": { "schema": { "$ref": "#/entities/SessionRecoveryRequest" }, "description": "Admin-reviewed participant session recovery requests." },
+    "/recoveryAuditLogs/{logId}": { "schema": { "$ref": "#/entities/RecoveryAuditLog" }, "description": "Immutable admin recovery and acknowledgment audit logs." }
+  }
+}

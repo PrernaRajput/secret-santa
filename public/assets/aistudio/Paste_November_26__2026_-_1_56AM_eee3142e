@@ -1,0 +1,1179 @@
+Here’s a **production-focused Codex prompt** for your Secret Santa website. It includes your exact tech stack, passwordless personal invitation links, secure participant authentication, three animated themes, random matching, scratch-card reveal, and admin functionality.
+
+I've structured it so Codex can build an actual working application rather than just a UI prototype.
+
+**Recommended approach:** Use a React + Vite SPA with Vercel Functions as the secure backend. Firebase Firestore stores participant data, while authentication, invitation validation, matching, and reveal authorization happen server-side.
+
+Copy the prompt below into Codex and attach your invitation-screen screenshot as a visual reference.
+
+# CODEX MASTER PROMPT — SECRET SANTA WEB APPLICATION
+
+You are a senior full-stack engineer, UI/UX designer, and animation specialist.
+
+Build a complete, production-ready, mobile-first **Secret Santa web application** using React, TypeScript, Firebase Firestore, Vercel Functions, Tailwind CSS, and Framer Motion (Motion for React).
+
+The application should feel like an interactive Christmas experience rather than a traditional website.
+
+It must have beautiful 3D cartoon aesthetics, smooth animations, playful interactions, secure passwordless invitation authentication, randomized Secret Santa matching, and a scratch-card gift recipient reveal.
+
+**IMPORTANT:** Implement the complete working application, not just static mockups. Prioritize secure architecture, clean code, maintainability, responsiveness, and delightful interactions.
+
+---
+
+# 1. TECH STACK
+
+Use exactly this stack:
+
+| Purpose         | Technology                                 |
+| --------------- | ------------------------------------------ |
+| Frontend        | React + Vite + TypeScript                  |
+| Styling         | Tailwind CSS                               |
+| Animations      | Framer Motion / Motion for React           |
+| Database        | Firebase Firestore                         |
+| Backend         | Vercel Functions (Node.js + TypeScript)    |
+| Hosting         | Vercel                                     |
+| Version Control | GitHub                                     |
+| Icons           | Lucide React                               |
+| Validation      | Zod                                        |
+| Testing         | Vitest + React Testing Library, Playwright |
+
+Additional lightweight libraries are permitted when they materially improve the application.
+
+Use Canvas APIs where appropriate for scratch-card interactions, and device-motion APIs for mobile shake detection.
+
+Do not introduce Next.js or a separate Express server.
+
+---
+
+# 2. DESIGN REFERENCE — INVITATION SCREEN
+
+Use the attached screenshot as the visual starting point.
+
+The invitation page should have:
+
+- A black or near-black background.
+- A large, rounded, warm-cream invitation card.
+- A beautiful red envelope with a heart-shaped wax seal.
+- Small decorative golden dots on the card.
+- Headline: "You've been secretly invited!"
+- Secondary headline: "Psst... Santa needs you!"
+- Subtitle: "A little mystery. A little mischief. A whole lot of Christmas magic."
+- A full-width muted Christmas-red CTA: "Unwrap my invitation 🎁"
+- No email, password, OTP, or conventional login screen.
+
+Use the screenshot's elegant typography, soft colors, spacing, and rounded visual style while making it more interactive and polished.
+
+### Invitation animation
+
+The envelope should have a subtle floating animation.
+
+On clicking "Unwrap my invitation":
+
+1. The envelope moves toward the center.
+2. The wax seal pops open.
+3. The envelope flap opens with a 3D transform.
+4. A letter slides upward.
+5. Golden sparkles appear.
+6. The letter unfolds.
+7. The registration screen transitions into view.
+
+Use Framer Motion for the orchestration.
+
+Ensure smooth 60 FPS-friendly animation where possible.
+
+Include reduced-motion support.
+
+---
+
+# 3. CORE USER JOURNEY
+
+The flow must be:
+
+Personal invitation link\
+→ Animated invitation opening\
+→ Participant details\
+→ Hobby selection\
+→ Avatar selection\
+→ Secret Santa participation question\
+→ Successful registration\
+→ Waiting/countdown screen\
+→ Server-side randomized matching\
+→ Reveal unlock\
+→ Scratch or shake interaction\
+→ Assigned gift recipient displayed\
+→ Recipient details and gifting information.
+
+Create proper route handling and persisted state so refreshing the page does not restart completed onboarding.
+
+---
+
+# 4. PASSWORDLESS PERSONAL INVITATION AUTHENTICATION
+
+There must be NO email/password login.
+
+Each participant receives a unique invitation URL.
+
+Example:
+
+`https://secretsanta.vercel.app/join?token=<secure-random-token>`
+
+### Admin invitation generation
+
+The admin can generate personal invitation links for participants.
+
+Each invitation must have:
+
+- Secure cryptographically generated token.
+- Unique invitation ID.
+- Event ID.
+- Expiration timestamp.
+- Invitation status.
+- Participant association once claimed.
+- Created and claimed timestamps.
+
+Generate tokens using cryptographically secure randomness, at least 256 bits.
+
+Never generate invitation secrets with `Math.random()`.
+
+Store only a cryptographic hash of the invitation token in Firestore.
+
+### Authentication workflow
+
+When a user opens their invitation:
+
+1. Frontend calls a Vercel Function.
+2. Backend validates token hash, event, expiration, and invitation status.
+3. Backend atomically claims an unused invitation or resumes an existing authorized session.
+4. Backend establishes a secure session.
+5. Backend sets an HttpOnly, Secure, SameSite cookie.
+6. Frontend navigates to invitation onboarding.
+
+After establishing the session, remove the token from the browser address bar using history replacement.
+
+Do not store sensitive tokens in localStorage.
+
+A claimed invitation must never allow a different browser to take over an existing account automatically.
+
+### Returning users
+
+Existing authenticated participants should resume their session automatically.
+
+Provide a secure admin-mediated recovery or invitation reissue workflow if a session is lost.
+
+Do not implement insecure account recovery using only a participant's name.
+
+### Session security
+
+Implement:
+
+- Session expiration.
+- Session rotation.
+- Logout.
+- CSRF protection on state-changing endpoints.
+- Rate limiting for sensitive APIs.
+- Secure error handling.
+- Replay and reuse protection.
+- Server-side authorization.
+
+Do not use the Firebase Admin SDK in frontend code.
+
+Do not assume that an invitation token by itself provides permanent secure account recovery.
+
+---
+
+# 5. PARTICIPANT DETAILS SCREEN
+
+Build a cute, mobile-first form.
+
+Fields:
+
+**Full name**
+
+Required, with validation and sensible length limits.
+
+**Delivery address**
+
+Required.
+
+Suggested fields:
+
+- Address line 1
+- Address line 2
+- Landmark
+- City
+- State
+- PIN code
+- Phone number, if required for delivery
+
+Use India-focused address validation where appropriate.
+
+Provide an option to paste an entire address and parse it into editable fields.
+
+### Import address from:
+
+- Blinkit
+- Amazon
+- Zomato
+- Flipkart
+
+Create attractive brand-specific import buttons.
+
+**Important integration requirement:**
+
+Do not pretend that these platforms expose public APIs for importing a user's saved addresses.
+
+Research the officially supported integration options. Only implement direct account imports if a legitimate, authorized integration exists.
+
+Otherwise provide a polished fallback:
+
+1. User selects a provider.
+2. Show instructions for copying the delivery address from that application.
+3. User pastes the address or uses the Clipboard API after explicit permission.
+4. Parse the address into editable form fields.
+5. User reviews and confirms.
+
+Never scrape private accounts, request third-party passwords, or claim an import succeeded when it did not.
+
+---
+
+# 6. HOBBY SELECTION
+
+Every participant must select at least one hobby.
+
+Maximum: **5 hobbies total**, including custom hobbies.
+
+Display beautifully styled selectable chips with emojis.
+
+Suggested hobbies:
+
+- 📚 Reading
+- 🎮 Gaming
+- 🎨 Art
+- 🎵 Music
+- ✈️ Travelling
+- 🍫 Chocolate
+- 🍳 Cooking
+- 🏋️ Fitness
+- 🎬 Movies
+- 🧴 Skincare
+- ☕ Coffee
+- 🐱 Pets
+- 🌿 Plants
+- 📷 Photography
+- 💻 Technology
+- 🧸 Collectibles
+- 👗 Fashion
+- 🍰 Baking
+
+### Behavior
+
+- Tap a chip to select.
+- Tap again to deselect.
+- Selected chips become visually highlighted.
+- Animate selection with a small bounce.
+- Show counter such as `3/5 selected`.
+- Allow custom hobby input.
+- Trim and validate custom values.
+- Prevent duplicate values, case-insensitively.
+- Disable additional selections after five.
+- Allow deselection even after reaching five.
+
+When attempting to select a sixth hobby, display:
+
+"Whoa! Santa only has room for 5 clues! 🎅"
+
+Persist the hobby selections to the participant profile.
+
+---
+
+# 7. AVATAR SELECTION
+
+Provide at least **20 different cartoon avatars**.
+
+The style must be consistent: cute 3D Christmas characters, expressive faces, soft shadows, rounded proportions, and warm lighting.
+
+Include a variety of:
+
+- Female-presenting avatars
+- Male-presenting avatars
+- Gender-neutral avatars
+
+Allow users to optionally select a gender category to filter the choices.
+
+Do not require a participant to disclose their gender.
+
+Also allow viewing all avatars regardless of gender.
+
+Suggested characters:
+
+- Santa hat girl
+- Winter scarf girl
+- Christmas sweater boy
+- Reindeer hoodie girl
+- Elf boy
+- Elf girl
+- Snowflake princess
+- Gingerbread character
+- Winter gamer
+- Cozy bookworm
+- Penguin hoodie
+- Snowman-inspired character
+- Christmas musician
+- Winter artist
+- Christmas baker
+- Red-nosed reindeer character
+- Hot chocolate lover
+- Christmas explorer
+- Holiday nerd
+- Festive party character
+
+Do not use identical images with only a color filter applied.
+
+Store avatar IDs rather than large image data.
+
+Use optimized image assets, with attractive fallback placeholders.
+
+---
+
+# 8. SECRET SANTA JOIN SCREEN
+
+After finishing participant details, display:
+
+**"Wanna join Secret Santa? 🎁"**
+
+Subtitle:
+
+"There's only one correct answer. Santa is watching! 👀"
+
+Two buttons:
+
+**YES — Join the magic!**
+
+**NO — Catch me if you can!**
+
+### Runaway NO button
+
+The No button must be intentionally impossible to activate through normal pointer or touch interaction.
+
+On pointer approaching the No button:
+
+- Detect proximity.
+- Animate the button away.
+- Keep it within the available viewport.
+- Avoid overlap with important UI.
+- Use playful spring animations.
+- Change its position unpredictably.
+
+For mobile:
+
+- Move the No button on touch-start or attempted interaction.
+- Use a predefined safe-area movement system.
+- Never let the button overflow the screen.
+
+### Funny messages
+
+Cycle through funny messages as the user keeps trying:
+
+1. "Nice try! 😜"
+2. "Santa said NO to your NO! 🎅"
+3. "Aise kaise? Join karo! 😂"
+4. "Itna attitude? Gift nahi chahiye kya? 🎁"
+5. "Even Rudolph is judging you! 🦌"
+6. "The NO button has left the chat! 💨"
+7. "Bas kar pagle, join kar le! ❤️"
+8. "You're still chasing me? Respect the dedication! 😂"
+9. "Santa is getting impatient! 🎄"
+10. "Okay, this is getting embarrassing. Just click YES! 🤣"
+
+Make Santa react with laughing animations and the reindeer shake their heads.
+
+Provide keyboard and screen-reader accessibility: the decorative No control should not trap focus or create an inaccessible form. The actual participation action must remain explicitly consent-based; allow users to leave or close the invitation without joining.
+
+### YES action
+
+On clicking YES:
+
+- Trigger confetti.
+- Santa celebrates.
+- Gift boxes bounce.
+- Show successful registration.
+- Save participation consent securely.
+- Transition to the countdown screen.
+
+---
+
+# 9. SECRET SANTA MATCHING SYSTEM
+
+The admin must be able to specify:
+
+- Registration deadline.
+- Matching date and time.
+- Reveal date and time.
+- Event timezone, default Asia/Kolkata.
+
+These may be different.
+
+Participants must be prevented from joining after registration closes unless the admin explicitly reopens registration.
+
+### Matching requirements
+
+- Matching happens securely on the backend.
+- Matching must never be calculated or disclosed on the frontend before reveal.
+- Every participating user sends a gift to exactly one other user.
+- Every participant receives exactly one gift.
+- Nobody can be assigned themselves.
+- Matches must be random and unbiased among valid assignments.
+- No duplicate recipients.
+- No missing assignments.
+- Handle participant counts of zero, one, two, and larger groups.
+- Use a cryptographically secure randomness source.
+- Persist the resulting matches.
+
+Use a suitable unbiased derangement generation approach.
+
+Do not implement a naïve random shuffle that can fail unpredictably or silently produce self-matches.
+
+For a participant count of one, report that matching is impossible.
+
+### Server-side matching
+
+Create a protected Vercel Function for executing matching.
+
+Use an authenticated scheduled trigger, such as Vercel Cron, to check matching eligibility.
+
+Enforce the configured event timestamp on the server regardless of when the scheduled invocation runs.
+
+Make matching idempotent and concurrency-safe.
+
+Use a transactional event lock or equivalent concurrency control to ensure two requests cannot create different assignments.
+
+Design the persistence mechanism to respect Firestore transaction and batch-operation limits.
+
+If an event has already been matched, do not reshuffle assignments automatically.
+
+Provide an explicit admin-only reset policy for test events.
+
+After matching, participants should still see only the waiting screen until their reveal time.
+
+---
+
+# 10. WAITING / COUNTDOWN SCREEN
+
+After joining, show:
+
+**"You're in! 🎉"**
+
+"Santa is secretly working on your surprise..."
+
+Display an animated countdown to the configured reveal date.
+
+Countdown format:
+
+Days : Hours : Minutes : Seconds
+
+Use the server's configured event schedule.
+
+Use client time only for display, not authorization.
+
+Include:
+
+- Floating gifts.
+- Falling snow.
+- Santa with a checklist.
+- Reindeer walking across the screen.
+- Subtle glowing lights.
+- Animated countdown numbers.
+
+Show a status message:
+
+"Your match is safely locked until reveal day! 🔒"
+
+Allow participants to edit their address and hobbies until a configured cutoff.
+
+---
+
+# 11. SCRATCH CARD AND PHONE SHAKE REVEAL
+
+After the reveal date and time:
+
+Show:
+
+**"It's reveal time! 🎉"**
+
+"Scratch the card or shake your phone to discover who gets your gift!"
+
+### Scratch card
+
+Create an interactive scratch card using HTML Canvas.
+
+Requirements:
+
+- Responsive canvas.
+- Mouse scratching.
+- Touch scratching.
+- High-DPI rendering.
+- Smooth erasing stroke.
+- Scratch progress detection.
+- Reveal after a configurable threshold, such as 55%.
+- Golden or silver scratch coating.
+- Hidden gift recipient card underneath.
+
+### Shake reveal
+
+Use device motion APIs where supported.
+
+Requirements:
+
+- Request motion permission through an explicit user gesture when necessary.
+- Detect a meaningful shake without triggering too easily.
+- Prevent repeated triggering.
+- Provide a fallback on unsupported devices.
+- Never require shaking as the only accessible reveal method.
+
+### Reveal animation
+
+Once the scratch threshold or shake condition is satisfied:
+
+1. Card begins glowing.
+2. Scratch coating disappears.
+3. Screen pauses briefly.
+4. Gift box shakes.
+5. Gift box opens dramatically.
+6. Confetti bursts.
+7. Recipient avatar appears.
+8. Recipient name animates into view.
+9. Play a comic "FAAAAH!" sound.
+10. Santa and reindeer celebrate.
+
+The sound must be triggered by a permitted user interaction, with a mute toggle and fallback if audio playback is blocked.
+
+Use an original or properly licensed sound effect.
+
+### Final reveal card
+
+Display:
+
+**"FAAAAAH! 🎉"**
+
+"You're the Secret Santa for..."
+
+[Recipient avatar]
+
+[Recipient name]
+
+"You've got a very important Christmas mission! 🎁"
+
+Buttons:
+
+- View gift preferences
+- View delivery address
+- Copy address
+- Gift ideas
+
+Show the recipient's hobbies.
+
+Only reveal the assigned recipient's permitted details to the correct authenticated participant, and only after the server-authorized reveal date.
+
+A participant must not be able to request another participant's information by changing an ID or URL.
+
+---
+
+# 12. THREE FULLY DIFFERENT THEMES
+
+Create a persistent semicircular theme carousel at the bottom of the application.
+
+Three options:
+
+**🎅 Santa — Snowy Christmas**
+
+**🍫 Chocolate — Chocolate Wonderland**
+
+**🤪 Surprise — Santa's Chaos**
+
+The entire application must change its appearance when switching themes.
+
+Not just background colors.
+
+Theme changes should affect:
+
+- Background scenery
+- Color palette
+- Buttons
+- Cards
+- Borders
+- Typography accents
+- Character decorations
+- Scratch card appearance
+- Gift box appearance
+- Confetti
+- Page transitions
+- Decorative elements
+
+Persist the selected theme as a user preference.
+
+## Theme A — Santa's Snowy Christmas
+
+Visual direction:
+
+- Snowy village at night.
+- Purple-blue sky.
+- Glowing yellow windows.
+- Santa and reindeer.
+- Falling snow.
+- Red ribbons and gift boxes.
+- Frosted glass cards.
+- Snow-covered buttons.
+- Light purple and Christmas-red accents.
+
+Use beautiful, soft, glossy 3D cartoon illustrations.
+
+## Theme B — Chocolate Wonderland
+
+Visual direction:
+
+- Rich chocolate-brown backgrounds.
+- Melting chocolate edges.
+- Cream-colored cards.
+- Golden highlights.
+- Chocolate bars and truffles.
+- Hot cocoa mugs.
+- Gingerbread characters.
+- Marshmallows and candy canes.
+- Chocolate-coated gift boxes.
+
+Buttons should look like polished chocolates.
+
+Scratch cards should resemble chocolate wrappers with golden foil.
+
+Add very subtle dripping-chocolate animations.
+
+This must feel distinctly different from the snowy theme.
+
+## Theme C — Santa's Chaos
+
+Visual direction:
+
+- Mischievous Santa.
+- Funny reindeer.
+- Playful expressive emojis.
+- Wacky floating gift boxes.
+- Unexpected animations.
+- Cartoon speech bubbles.
+- Bright festive colors.
+- Funny character reactions.
+- Comedic reveal animations.
+
+Use interactive comedy without making the application confusing or difficult to navigate.
+
+For example, the gift box could hiccup before opening, or Santa could dramatically faint from excitement.
+
+Maintain excellent usability despite the playful visual style.
+
+---
+
+# 13. THEME CAROUSEL
+
+Create a small floating semicircular carousel fixed near the bottom.
+
+It should contain:
+
+🎅  🍫  🤪
+
+The currently selected theme sits slightly higher and appears larger.
+
+The other two icons sit on the sides, following a curved arc.
+
+When changing themes:
+
+- Selected emoji scales up.
+- Carousel rotates subtly.
+- Background changes with a smooth transition.
+- Characters animate out and new characters animate in.
+- The current page and user progress stay unchanged.
+
+Support clicking, tapping, and keyboard navigation.
+
+Do not allow the carousel to cover form fields or critical buttons.
+
+---
+
+# 14. ADMIN DASHBOARD
+
+Build a separate, secure admin interface.
+
+Required features:
+
+### Event management
+
+- Create Secret Santa event.
+- Set event name.
+- Set registration deadline.
+- Set matching schedule.
+- Set reveal schedule.
+- Configure timezone.
+- Enable or disable registration.
+- View matching and reveal status.
+
+### Participant management
+
+- Generate secure invitation links.
+- View invitation statuses.
+- Copy invitation links.
+- Reissue invitations securely.
+- Revoke invitations and sessions.
+- View participant count.
+- View completed registrations.
+- View missing details.
+- Remove participants before matching.
+
+### Matching management
+
+- Start matching manually after eligibility checks.
+- Monitor automatic matching.
+- View matching success/failure.
+- Prevent accidental duplicate matching.
+- Handle insufficient participant counts.
+
+### Admin security
+
+Use a separate, strongly authenticated admin system.
+
+Do not rely on a secret admin URL or a hardcoded frontend password.
+
+Firebase Authentication with appropriate admin identity verification is acceptable for administrators only.
+
+Protect all admin endpoints with server-side authorization.
+
+### Privacy
+
+Administrators may manage participant data as needed for event operations.
+
+Do not disclose assignments to ordinary participants before reveal.
+
+---
+
+# 15. FIRESTORE DATA MODEL
+
+Design a normalized Firestore schema around collections such as:
+
+`events`
+
+`invitations`
+
+`participants`
+
+`sessions`
+
+`matches`
+
+`auditLogs`
+
+Use suitable fields, indexes, and access controls.
+
+Example participant structure:
+
+```
+interface Participant {
+  id: string;
+  eventId: string;
+  invitationId: string;
+
+  name: string;
+
+  address: {
+    line1: string;
+    line2?: string;
+    landmark?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    phone?: string;
+  };
+
+  hobbies: string[];
+  avatarId: string;
+  genderPreference?: "female" | "male" | "neutral";
+
+  selectedTheme: "santa" | "chocolate" | "funny";
+
+  hasJoined: boolean;
+
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+Define additional secure server-only models for invitations, sessions, matches, and event configuration.
+
+Use server-generated timestamps where appropriate.
+
+### Database security
+
+- Do not expose sensitive Firestore collections to direct unauthenticated client access.
+- Route sensitive operations through Vercel Functions.
+- Use the Firebase Admin SDK only on the server.
+- Configure Firestore security rules to deny unauthorized client access.
+- Use least-privilege server credentials.
+- Never store raw invitation secrets.
+- Protect delivery addresses and contact information.
+- Avoid exposing session identifiers or recipient details in logs.
+
+---
+
+# 16. API DESIGN
+
+Implement REST-style Vercel Functions for:
+
+### Invitation and authentication
+
+- Validate and redeem invitation.
+- Get current session.
+- Refresh or rotate session.
+- Logout.
+
+### Participant
+
+- Get own profile.
+- Save own details.
+- Save hobbies.
+- Save avatar.
+- Join event.
+- Update allowed profile fields.
+
+### Event
+
+- Get safe public event information.
+- Get participant-specific countdown/status.
+
+### Matching
+
+- Scheduled matching handler.
+- Admin-protected matching trigger.
+- Get current user's reveal eligibility.
+- Get current user's assigned recipient after reveal.
+
+### Admin
+
+- Create event.
+- Update event.
+- Generate invitations.
+- List invitation statuses.
+- Revoke/reissue invitation.
+- List participants.
+- View event status.
+
+All sensitive endpoints must validate the active session and enforce ownership and event-level authorization server-side.
+
+Use Zod validation for all untrusted request payloads.
+
+Return consistent API response and error structures.
+
+---
+
+# 17. RESPONSIVE DESIGN
+
+Support:
+
+- Small phones (320px width and above).
+- Standard Android phones.
+- iPhones.
+- Tablets.
+- Desktop browsers.
+
+Mobile-first design is mandatory.
+
+On desktop, use a centered interactive scene or larger responsive composition, not an awkward stretched mobile form.
+
+Respect safe-area insets and mobile browser toolbars.
+
+Use accessible minimum touch target sizes.
+
+Avoid horizontal scrolling.
+
+Optimize images and animation assets.
+
+---
+
+# 18. ANIMATION SPECIFICATIONS
+
+Use Framer Motion for:
+
+- Envelope opening.
+- Page transitions.
+- Form card entrance.
+- Hobby chip selection.
+- Avatar selection.
+- Runaway No button.
+- Santa reactions.
+- Gift box bouncing.
+- Theme carousel.
+- Countdown number transitions.
+- Scratch reveal celebration.
+- Confetti and surprise effects.
+
+Use CSS animations or Canvas where more efficient.
+
+Avoid excessive simultaneous animations that create poor mobile performance.
+
+Implement `prefers-reduced-motion`.
+
+Ensure usability when animations are disabled.
+
+---
+
+# 19. FOOTER
+
+Every screen must show:
+
+**Made by Dheeraj and Prerna Pvt LTD**
+
+Style the footer appropriately for each theme.
+
+Snow theme: subtle glowing text.
+
+Chocolate theme: cream-and-chocolate lettering.
+
+Funny theme: playful bouncing accent.
+
+Keep the wording consistent across all pages.
+
+---
+
+# 20. PROJECT STRUCTURE
+
+Use a scalable feature-based structure.
+
+Suggested layout:
+
+```
+src/
+  app/
+  components/
+    common/
+    layout/
+    animations/
+  features/
+    invitation/
+    onboarding/
+    hobbies/
+    avatars/
+    participation/
+    countdown/
+    reveal/
+    themes/
+    admin/
+  hooks/
+  services/
+  types/
+  utils/
+  assets/
+  styles/
+
+api/
+  auth/
+  participant/
+  events/
+  reveal/
+  admin/
+  cron/
+  _lib/
+
+tests/
+  unit/
+  integration/
+  e2e/
+
+public/
+  images/
+  sounds/
+```
+
+Adjust to valid Vercel routing and deployment conventions.
+
+Use reusable components and typed interfaces.
+
+Avoid large monolithic components.
+
+Separate UI, domain logic, API communication, and backend services.
+
+---
+
+# 21. TESTING
+
+Implement meaningful tests for:
+
+- Invitation token validation.
+- Expired/revoked invitation.
+- Duplicate invitation claims.
+- Session authorization.
+- Participant onboarding.
+- Maximum five hobbies.
+- Custom hobby validation.
+- Match correctness.
+- Self-matching prevention.
+- Concurrent matching requests.
+- Matching idempotency.
+- Reveal before deadline.
+- Reveal after deadline.
+- Unauthorized recipient access.
+- Scratch completion.
+- Theme persistence.
+- Mobile interaction behavior.
+
+Include end-to-end tests for the full participant journey.
+
+---
+
+# 22. DEVELOPMENT AND DEPLOYMENT
+
+Provide:
+
+- Working Vite configuration.
+- TypeScript strict configuration.
+- Tailwind configuration.
+- Firebase server initialization.
+- Firestore indexes and security rules.
+- Vercel configuration.
+- Scheduled matching configuration.
+- Environment-variable example.
+- Local development instructions.
+- Build scripts.
+- Type-checking.
+- Linting.
+- Tests.
+- Production deployment guide.
+- README.
+
+Environment variables should clearly distinguish frontend-safe settings from server-only secrets.
+
+Never commit Firebase service account private keys or other credentials.
+
+Ensure Vercel Functions work under the selected module and runtime configuration.
+
+Document any platform limitations, including differences between local and production scheduling.
+
+---
+
+# 23. IMPLEMENTATION ORDER
+
+Build the application incrementally, in this order:
+
+**Phase 1 — Foundation**
+
+Set up Vite, React, TypeScript, Tailwind, routing, UI tokens, layout, Firebase configuration, backend structure, and environment validation.
+
+**Phase 2 — Invitation and authentication**
+
+Implement secure invitation generation, redemption, sessions, and the animated invitation screen.
+
+**Phase 3 — Onboarding**
+
+Build participant details, delivery address, hobby chips, and avatar selection.
+
+**Phase 4 — Join experience**
+
+Build the yes/no screen, runaway button, funny messages, participant enrollment, and confirmation.
+
+**Phase 5 — Matching and countdown**
+
+Build event scheduling, safe random matching, countdown, and assignment persistence.
+
+**Phase 6 — Reveal**
+
+Implement scratch card, mobile shake interaction, secure recipient retrieval, reveal animation, and sound effects.
+
+**Phase 7 — Themes**
+
+Implement complete Santa, Chocolate Wonderland, and Santa's Chaos theme variations with the semicircular carousel.
+
+**Phase 8 — Admin**
+
+Implement secure event management, invitations, participants, and matching dashboard.
+
+**Phase 9 — Production hardening**
+
+Add tests, accessibility, performance optimization, responsive QA, security checks, documentation, and deployment configuration.
+
+---
+
+# 24. IMPORTANT ACCEPTANCE CRITERIA
+
+The project is complete only when:
+
+1. An admin can create an event and generate an invitation.
+2. A participant can open the unique invitation link.
+3. The invitation opens with the animated envelope.
+4. The participant can save name, address, hobbies, and avatar.
+5. Exactly five hobbies maximum are enforced.
+6. The join screen displays the playful running No button.
+7. Clicking Yes securely registers the participant.
+8. The waiting screen displays the correct countdown.
+9. Matching occurs once, securely, after the configured matching time.
+10. Every participant has exactly one valid recipient when matching succeeds.
+11. Recipient data remains inaccessible before reveal.
+12. An authenticated participant can scratch or shake to reveal after unlock.
+13. The reveal displays the actual persisted assigned recipient.
+14. The FAAAAH sound and celebration play appropriately.
+15. All three themes work across the complete journey.
+16. Refreshing preserves session and progress.
+17. Admin permissions and private data are protected.
+18. The application works on mobile and desktop.
+19. The project builds and tests successfully.
+20. The application can be deployed to Vercel with documented configuration.
+
+---
+
+# 25. CODEX EXECUTION INSTRUCTIONS
+
+First inspect the existing repository.
+
+If files already exist, preserve working functionality unless changes are necessary for the requested requirements.
+
+Before coding, briefly outline the architecture, relevant security choices, and implementation phases.
+
+Then implement the application directly in the repository.
+
+Do not stop at a high-level proposal or pseudocode.
+
+Do not replace core requirements with static mock data.
+
+Use small development fixtures only where clearly separated from production data.
+
+If live third-party address import is unsupported, implement the manual/clipboard fallback instead of faking it.
+
+If environment variables or credentials are unavailable, create the required configuration files and make the missing external setup explicit; continue implementing and testing everything that does not require those credentials.
+
+After implementation:
+
+- Run the build.
+- Run TypeScript checks.
+- Run lint checks.
+- Run available tests.
+- Fix errors.
+- Report remaining limitations.
+
+Use clean, production-quality code.
+
+**Design goal:** The user should feel like they are opening a magical, slightly mischievous Christmas present, not filling out a corporate registration form.
+
+**Final expectation:** A fully functional, secure, adorable Secret Santa website with delightful animations, personalized invitations, three visually distinct themes, and an exciting scratch-card reveal.
+
+## **A few important implementation decisions**
+
+I recommend keeping these decisions consistent while Codex builds the app:
+
+| Feature                | Recommended implementation                                        |
+| ---------------------- | ----------------------------------------------------------------- |
+| Authentication         | Secure one-time invitation redemption + HttpOnly session cookie   |
+| Saved participant data | Firestore, accessed via Vercel Functions                          |
+| Random matching        | Server-side derangement algorithm                                 |
+| Scheduled matching     | Vercel Cron with server-side date verification                    |
+| Scratch card           | HTML Canvas                                                       |
+| Shake detection        | DeviceMotion API, with permission and fallback                    |
+| Cartoon artwork        | Consistent optimized 3D illustration assets                       |
+| Theme switching        | Global theme tokens + Framer Motion transitions                   |
+| Address import         | Clipboard-based import unless official integrations are available |
+
+One particularly important distinction: **the person revealed should be the participant's assigned gift recipient**, not necessarily the person who is buying a gift for them. Otherwise, it breaks the secrecy of Secret Santa.
+
+For the best visual results, attach your invitation screenshot and the earlier Santa, chocolate, and funny theme mockups to the Codex task. This will help it preserve the aesthetic while implementing working screens.

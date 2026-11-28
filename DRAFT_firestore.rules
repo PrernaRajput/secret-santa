@@ -1,0 +1,1071 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Hardened Helpers
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function callerEmailHash() {
+      return hashing.sha256(request.auth.token.email.lower()).toHexString().lower();
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() == 'prernarajput09.cs@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() && (
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+          || (
+            request.auth.token.email is string
+            && exists(/databases/$(database)/documents/admins/$(callerEmailHash()))
+          )
+        )
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidHashId(id) {
+      return id is string && id.size() == 64 && id.matches('^[a-f0-9]{64}$');
+    }
+
+    function isValidScopedId(id) {
+      return id is string && id.size() >= 66 && id.size() <= 96 && id.matches('^[a-f0-9]{64}_[a-zA-Z0-9\\-]+$');
+    }
+
+    function isValidOptionalString(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function isValidNonEmptyString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidBoundedStringList(arr, maxItems, maxItemLen) {
+      return arr is list
+        && arr.size() <= maxItems
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= maxItemLen));
+    }
+
+    function isValidAddress(addr) {
+      return addr is map
+        && addr.keys().hasAll(['line1', 'line2', 'landmark', 'city', 'state', 'postalCode', 'phone'])
+        && addr.keys().hasOnly(['line1', 'line2', 'landmark', 'city', 'state', 'postalCode', 'phone'])
+        && isValidNonEmptyString(addr.line1, 3, 200)
+        && isValidOptionalString(addr.line2, 200)
+        && isValidOptionalString(addr.landmark, 120)
+        && isValidNonEmptyString(addr.city, 2, 80)
+        && isValidNonEmptyString(addr.state, 2, 80)
+        && isValidNonEmptyString(addr.postalCode, 4, 12)
+        && isValidOptionalString(addr.phone, 20);
+    }
+
+    function isValidHobbies(hobbies) {
+      return hobbies is list
+        && hobbies.size() >= 1
+        && hobbies.size() <= 5
+        && hobbies[0] is string
+        && hobbies[0].size() >= 1
+        && hobbies[0].size() <= 40;
+    }
+
+    function isValidBudget(budget) {
+      return budget is map
+        && budget.keys().hasAll(['mode', 'currency', 'minAmount', 'maxAmount', 'announcement'])
+        && budget.keys().hasOnly(['mode', 'currency', 'minAmount', 'maxAmount', 'announcement'])
+        && budget.mode in ['fixed', 'range']
+        && isValidNonEmptyString(budget.currency, 1, 8)
+        && budget.minAmount is int && budget.minAmount >= 0 && budget.minAmount <= 1000000
+        && budget.maxAmount is int && budget.maxAmount >= budget.minAmount && budget.maxAmount <= 1000000
+        && isValidOptionalString(budget.announcement, 240);
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'displayName', 'createdAt'])
+        && data.keys().hasOnly(['email', 'displayName', 'createdAt'])
+        && isValidNonEmptyString(data.email, 5, 160)
+        && data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
+        && isValidOptionalString(data.displayName, 100)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll([
+          'name', 'timezone', 'registrationOpen', 'registrationDeadline',
+          'gifteeRevealAt', 'giftDeadline', 'santaIdentityRevealAt',
+          'isMatched', 'participantCount', 'createdBy', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'timezone', 'registrationOpen', 'registrationDeadline',
+          'gifteeRevealAt', 'giftDeadline', 'santaIdentityRevealAt',
+          'isMatched', 'matchedAt', 'participantCount', 'createdBy', 'createdAt', 'updatedAt',
+          'budget', 'mailboxEnabled', 'mailboxOpenAt', 'mailboxCloseAt',
+          'guessingEnabled', 'maxGuesses', 'allowDuplicateGuesses',
+          'adventEnabled', 'adventStartAt', 'adventEndAt', 'adventAllowCatchUp',
+          'wheelEnabled', 'elfChallengeEnabled', 'quizEnabled', 'quizAllowRetake',
+          'deliveryTrackingEnabled', 'allowSharedTrackingLink',
+          'thankYouEnabled', 'snowGlobeRevealEnabled', 'giftPreferencesCutoffAt'
+        ])
+        && isValidNonEmptyString(data.name, 2, 120)
+        && isValidNonEmptyString(data.timezone, 2, 64)
+        && data.registrationOpen is bool
+        && data.registrationDeadline is timestamp
+        && data.gifteeRevealAt is timestamp
+        && data.giftDeadline is timestamp
+        && data.santaIdentityRevealAt is timestamp
+        && data.isMatched is bool
+        && data.participantCount is int
+        && data.participantCount >= 0
+        && data.participantCount <= 500
+        && isValidId(data.createdBy)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('matchedAt' in data) || data.matchedAt == null || data.matchedAt is timestamp)
+        && (!('budget' in data) || isValidBudget(data.budget))
+        && (!('mailboxEnabled' in data) || data.mailboxEnabled is bool)
+        && (!('mailboxOpenAt' in data) || data.mailboxOpenAt is timestamp)
+        && (!('mailboxCloseAt' in data) || data.mailboxCloseAt is timestamp)
+        && (!('guessingEnabled' in data) || data.guessingEnabled is bool)
+        && (!('maxGuesses' in data) || (data.maxGuesses is int && data.maxGuesses >= 1 && data.maxGuesses <= 10))
+        && (!('allowDuplicateGuesses' in data) || data.allowDuplicateGuesses is bool)
+        && (!('adventEnabled' in data) || data.adventEnabled is bool)
+        && (!('adventStartAt' in data) || data.adventStartAt is timestamp)
+        && (!('adventEndAt' in data) || data.adventEndAt is timestamp)
+        && (!('adventAllowCatchUp' in data) || data.adventAllowCatchUp is bool)
+        && (!('wheelEnabled' in data) || data.wheelEnabled is bool)
+        && (!('elfChallengeEnabled' in data) || data.elfChallengeEnabled is bool)
+        && (!('quizEnabled' in data) || data.quizEnabled is bool)
+        && (!('quizAllowRetake' in data) || data.quizAllowRetake is bool)
+        && (!('deliveryTrackingEnabled' in data) || data.deliveryTrackingEnabled is bool)
+        && (!('allowSharedTrackingLink' in data) || data.allowSharedTrackingLink is bool)
+        && (!('thankYouEnabled' in data) || data.thankYouEnabled is bool)
+        && (!('snowGlobeRevealEnabled' in data) || data.snowGlobeRevealEnabled is bool)
+        && (!('giftPreferencesCutoffAt' in data) || data.giftPreferencesCutoffAt is timestamp);
+    }
+
+    function isValidInvitation(data) {
+      return data.keys().hasAll(['eventId', 'label', 'status', 'participantKey', 'expiresAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'eventId', 'label', 'status', 'participantKey', 'expiresAt',
+          'createdAt', 'updatedAt', 'claimedAt', 'isRecovery', 'recoveryParticipantKey'
+        ])
+        && isValidId(data.eventId)
+        && isValidOptionalString(data.label, 100)
+        && data.status in ['pending', 'claimed', 'revoked']
+        && (data.participantKey == '' || isValidHashId(data.participantKey))
+        && (!('isRecovery' in data) || data.isRecovery is bool)
+        && (!('recoveryParticipantKey' in data) || data.recoveryParticipantKey == '' || isValidHashId(data.recoveryParticipantKey))
+        && data.expiresAt is timestamp
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('claimedAt' in data) || data.claimedAt == null || data.claimedAt is timestamp);
+    }
+
+    function isValidParticipant(data) {
+      return data.keys().hasAll([
+          'eventId', 'invitationHash', 'name', 'address', 'hobbies',
+          'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'invitationHash', 'name', 'address', 'hobbies',
+          'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && (data.invitationHash == '' || isValidHashId(data.invitationHash))
+        && isValidNonEmptyString(data.name, 1, 100)
+        && isValidAddress(data.address)
+        && isValidHobbies(data.hobbies)
+        && isValidId(data.avatarId)
+        && data.genderPreference in ['all', 'female', 'male', 'neutral']
+        && data.selectedTheme in ['santa', 'chocolate', 'funny']
+        && data.hasJoined is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEventRoster(data) {
+      return data.keys().hasAll(['eventId', 'entries', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'entries', 'updatedAt'])
+        && isValidId(data.eventId)
+        && data.entries is list
+        && data.entries.size() <= 200
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMatch(data) {
+      return data.keys().hasAll([
+          'eventId', 'giverKey', 'recipientName', 'recipientAvatarId',
+          'recipientHobbies', 'recipientAddress', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'giverKey', 'outgoingAssignmentId', 'recipientName',
+          'recipientAvatarId', 'recipientHobbies', 'recipientAddress',
+          'recipientDislikes', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.giverKey)
+        && (!('outgoingAssignmentId' in data) || data.outgoingAssignmentId == '' || isValidHashId(data.outgoingAssignmentId))
+        && isValidNonEmptyString(data.recipientName, 1, 100)
+        && isValidId(data.recipientAvatarId)
+        && isValidHobbies(data.recipientHobbies)
+        && isValidAddress(data.recipientAddress)
+        && (!('recipientDislikes' in data) || data.recipientDislikes == null || data.recipientDislikes is map)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidIncomingAssignment(data) {
+      return data.keys().hasAll(['eventId', 'recipientKey', 'incomingAssignmentId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'recipientKey', 'incomingAssignmentId', 'createdAt', 'updatedAt'])
+        && isValidId(data.eventId)
+        && isValidHashId(data.recipientKey)
+        && isValidHashId(data.incomingAssignmentId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSantaReveal(data) {
+      return data.keys().hasAll([
+          'eventId', 'recipientKey', 'santaName', 'santaAvatarId',
+          'santaHobbies', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'recipientKey', 'santaPublicId', 'santaName',
+          'santaAvatarId', 'santaHobbies', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.recipientKey)
+        && (!('santaPublicId' in data) || data.santaPublicId == '' || isValidHashId(data.santaPublicId))
+        && isValidNonEmptyString(data.santaName, 1, 100)
+        && isValidId(data.santaAvatarId)
+        && isValidHobbies(data.santaHobbies)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasAll(['eventId', 'messageCount', 'unreadForSanta', 'unreadForRecipient', 'updatedAt'])
+        && data.keys().hasOnly([
+          'eventId', 'messageCount', 'unreadForSanta', 'unreadForRecipient',
+          'lastSenderRole', 'lastMessageAt', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && data.messageCount is int && data.messageCount >= 0 && data.messageCount <= 500
+        && data.unreadForSanta is int && data.unreadForSanta >= 0 && data.unreadForSanta <= 500
+        && data.unreadForRecipient is int && data.unreadForRecipient >= 0 && data.unreadForRecipient <= 500
+        && (!('lastSenderRole' in data) || data.lastSenderRole == null || data.lastSenderRole in ['santa', 'recipient'])
+        && (!('lastMessageAt' in data) || data.lastMessageAt == null || data.lastMessageAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAnonymousMessage(data) {
+      return data.keys().hasAll(['eventId', 'assignmentId', 'senderRole', 'body', 'readByOther', 'reported', 'createdAt'])
+        && data.keys().hasOnly([
+          'eventId', 'assignmentId', 'senderRole', 'body',
+          'readByOther', 'reported', 'reportReason', 'createdAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.assignmentId)
+        && data.senderRole in ['santa', 'recipient']
+        && isValidNonEmptyString(data.body, 1, 500)
+        && data.readByOther is bool
+        && data.reported is bool
+        && (!('reportReason' in data) || isValidOptionalString(data.reportReason, 200))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSantaGuess(data) {
+      return data.keys().hasAll(['eventId', 'participantKey', 'guesses', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'participantKey', 'guesses', 'updatedAt'])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && data.guesses is list
+        && data.guesses.size() <= 10
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDeliveryProgress(data) {
+      return data.keys().hasAll(['eventId', 'assignmentId', 'stage', 'history', 'sharedNote', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'assignmentId', 'stage', 'history', 'sharedNote', 'updatedAt'])
+        && isValidId(data.eventId)
+        && isValidHashId(data.assignmentId)
+        && data.stage in ['preparing', 'shopping', 'wrapped', 'dispatched', 'delivered']
+        && data.history is list
+        && data.history.size() <= 20
+        && isValidOptionalString(data.sharedNote, 240)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateTracking(data) {
+      return data.keys().hasAll(['eventId', 'participantKey', 'courierName', 'trackingCode', 'privateNote', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'participantKey', 'courierName', 'trackingCode', 'privateNote', 'updatedAt'])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && isValidOptionalString(data.courierName, 80)
+        && isValidOptionalString(data.trackingCode, 120)
+        && isValidOptionalString(data.privateNote, 240)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDeliveryAck(data) {
+      return data.keys().hasAll([
+          'eventId', 'assignmentId', 'status', 'problemSummary',
+          'adminCorrectionNote', 'correctedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'assignmentId', 'status', 'acknowledgedAt',
+          'problemSummary', 'adminCorrectionNote', 'correctedBy', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.assignmentId)
+        && data.status in ['pending', 'received', 'problem']
+        && (!('acknowledgedAt' in data) || data.acknowledgedAt == null || data.acknowledgedAt is timestamp)
+        && isValidOptionalString(data.problemSummary, 300)
+        && isValidOptionalString(data.adminCorrectionNote, 300)
+        && isValidOptionalString(data.correctedBy, 160)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdventUnlock(data) {
+      return data.keys().hasAll([
+          'eventId', 'participantKey', 'day', 'rewardKind',
+          'collectibleId', 'collectibleName', 'collectibleEmoji', 'unlockedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'participantKey', 'day', 'rewardKind',
+          'collectibleId', 'collectibleName', 'collectibleEmoji', 'unlockedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && data.day is int && data.day >= 1 && data.day <= 25
+        && isValidNonEmptyString(data.rewardKind, 2, 32)
+        && isValidOptionalString(data.collectibleId, 64)
+        && isValidOptionalString(data.collectibleName, 100)
+        && isValidOptionalString(data.collectibleEmoji, 16)
+        && data.unlockedAt is timestamp;
+    }
+
+    function isValidWheelSpin(data) {
+      return data.keys().hasAll([
+          'eventId', 'participantKey', 'dateKey', 'prizeId', 'slotIndex',
+          'prizeLabel', 'prizeMessage', 'prizeEmoji', 'collectibleId', 'collectibleName', 'spunAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'participantKey', 'dateKey', 'prizeId', 'slotIndex',
+          'prizeLabel', 'prizeMessage', 'prizeEmoji', 'collectibleId', 'collectibleName', 'spunAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && isValidNonEmptyString(data.dateKey, 8, 16)
+        && isValidNonEmptyString(data.prizeId, 2, 64)
+        && data.slotIndex is int && data.slotIndex >= 0 && data.slotIndex <= 15
+        && isValidNonEmptyString(data.prizeLabel, 1, 100)
+        && isValidNonEmptyString(data.prizeMessage, 1, 240)
+        && isValidOptionalString(data.prizeEmoji, 16)
+        && isValidOptionalString(data.collectibleId, 64)
+        && isValidOptionalString(data.collectibleName, 100)
+        && data.spunAt is timestamp;
+    }
+
+    function isValidQuizResult(data) {
+      return data.keys().hasAll([
+          'eventId', 'participantKey', 'quizVersion', 'nicePercent',
+          'naughtyPercent', 'verdictTitle', 'verdictSubtitle', 'stampLabel', 'answers', 'completedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'participantKey', 'quizVersion', 'nicePercent',
+          'naughtyPercent', 'verdictTitle', 'verdictSubtitle', 'stampLabel', 'answers', 'completedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && isValidNonEmptyString(data.quizVersion, 2, 32)
+        && data.nicePercent is int && data.nicePercent >= 0 && data.nicePercent <= 100
+        && data.naughtyPercent is int && data.naughtyPercent >= 0 && data.naughtyPercent <= 100
+        && isValidNonEmptyString(data.verdictTitle, 2, 120)
+        && isValidNonEmptyString(data.verdictSubtitle, 2, 200)
+        && isValidNonEmptyString(data.stampLabel, 2, 40)
+        && data.answers is list && data.answers.size() >= 1 && data.answers.size() <= 12
+        && data.completedAt is timestamp;
+    }
+
+    function isValidElfDiscovery(data) {
+      return data.keys().hasAll([
+          'eventId', 'participantKey', 'dateKey', 'challengeId',
+          'spotId', 'rewardTitle', 'rewardEmoji', 'collectibleId', 'discoveredAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'participantKey', 'dateKey', 'challengeId',
+          'spotId', 'rewardTitle', 'rewardEmoji', 'collectibleId', 'discoveredAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && isValidNonEmptyString(data.dateKey, 8, 16)
+        && isValidNonEmptyString(data.challengeId, 4, 80)
+        && data.spotId in ['tree', 'mailbox', 'giftbox', 'calendar', 'footer', 'snowsign']
+        && isValidNonEmptyString(data.rewardTitle, 2, 100)
+        && isValidOptionalString(data.rewardEmoji, 16)
+        && isValidOptionalString(data.collectibleId, 64)
+        && data.discoveredAt is timestamp;
+    }
+
+    function isValidGingerbread(data) {
+      return data.keys().hasAll([
+          'eventId', 'participantKey', 'shape', 'icingColor',
+          'decorations', 'isPublicProfileDecor', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'participantKey', 'shape', 'icingColor',
+          'decorations', 'isPublicProfileDecor', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && data.shape in ['person', 'tree', 'star', 'reindeer']
+        && data.icingColor in ['white', 'pink', 'red', 'green', 'chocolate']
+        && data.decorations is list && data.decorations.size() <= 24
+        && data.isPublicProfileDecor is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGiftPreferences(data) {
+      return data.keys().hasAll([
+          'eventId', 'participantKey', 'dislikedCategories', 'dietaryRestrictions',
+          'dislikedColors', 'alreadyOwned', 'nonFoodNotes', 'generalNotes',
+          'shareWithSanta', 'shareDietaryWithSanta', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'participantKey', 'dislikedCategories', 'dietaryRestrictions',
+          'dislikedColors', 'alreadyOwned', 'nonFoodNotes', 'generalNotes',
+          'shareWithSanta', 'shareDietaryWithSanta', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && isValidBoundedStringList(data.dislikedCategories, 12, 60)
+        && isValidBoundedStringList(data.dietaryRestrictions, 8, 60)
+        && isValidBoundedStringList(data.dislikedColors, 8, 40)
+        && isValidBoundedStringList(data.alreadyOwned, 10, 60)
+        && isValidOptionalString(data.nonFoodNotes, 240)
+        && isValidOptionalString(data.generalNotes, 300)
+        && data.shareWithSanta is bool
+        && data.shareDietaryWithSanta is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidThankYouCard(data) {
+      return data.keys().hasAll(['eventId', 'assignmentId', 'templateId', 'message', 'reactions', 'createdAt'])
+        && data.keys().hasOnly(['eventId', 'assignmentId', 'templateId', 'message', 'reactions', 'createdAt'])
+        && isValidId(data.eventId)
+        && isValidHashId(data.assignmentId)
+        && data.templateId in ['santa-heart', 'reindeer-hug', 'snowman-wave', 'gingerbread-dance', 'choco-hearts']
+        && isValidNonEmptyString(data.message, 1, 300)
+        && isValidBoundedStringList(data.reactions, 8, 12)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSnowGlobe(data) {
+      return data.keys().hasAll(['eventId', 'participantKey', 'decorations', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'participantKey', 'decorations', 'updatedAt'])
+        && isValidId(data.eventId)
+        && isValidHashId(data.participantKey)
+        && data.decorations is list && data.decorations.size() <= 16
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRecoveryRequest(data) {
+      return data.keys().hasAll(['eventId', 'requestedName', 'verificationHint', 'status', 'createdAt'])
+        && data.keys().hasOnly(['eventId', 'requestedName', 'verificationHint', 'status', 'resolvedBy', 'createdAt'])
+        && isValidId(data.eventId)
+        && isValidNonEmptyString(data.requestedName, 1, 100)
+        && isValidOptionalString(data.verificationHint, 240)
+        && data.status in ['pending', 'resolved', 'dismissed']
+        && (!('resolvedBy' in data) || isValidOptionalString(data.resolvedBy, 160))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRecoveryAuditLog(data) {
+      return data.keys().hasAll(['eventId', 'action', 'actorEmail', 'targetLabel', 'note', 'createdAt'])
+        && data.keys().hasOnly(['eventId', 'action', 'actorEmail', 'targetLabel', 'note', 'createdAt'])
+        && isValidId(data.eventId)
+        && data.action in ['recovery_issued', 'invite_revoked', 'ack_corrected', 'request_dismissed']
+        && isValidNonEmptyString(data.actorEmail, 3, 160)
+        && isValidNonEmptyString(data.targetLabel, 1, 120)
+        && isValidOptionalString(data.note, 300)
+        && data.createdAt is timestamp;
+    }
+
+    // Connection test path (read-only ping)
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId)
+        && isSignedIn()
+        && (
+          request.auth.uid == adminId
+          || (request.auth.token.email is string && callerEmailHash() == adminId)
+          || isAdmin()
+        );
+      allow list: if isAdmin();
+      allow create: if isValidId(adminId)
+        && isValidAdminUser(incoming())
+        && isAdmin()
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(adminId)
+        && isValidAdminUser(incoming())
+        && isAdmin()
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(adminId) && isAdmin();
+    }
+
+    // Events Collection (Public schedule, budget, and feature flags — no PII)
+    match /events/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if isAdmin();
+      allow create: if isValidId(eventId)
+        && isValidEvent(incoming())
+        && isAdmin()
+        && incoming().createdBy == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(eventId)
+        && isValidEvent(incoming())
+        && isAdmin()
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidId(eventId) && isAdmin();
+    }
+
+    // Sanitized Public Roster for Guess Your Santa (NO PII, NO participantKey)
+    match /eventRosters/{eventId} {
+      allow get: if isValidId(eventId);
+      allow list: if isAdmin();
+      allow create, update: if isValidId(eventId)
+        && isValidEventRoster(incoming())
+        && isAdmin()
+        && incoming().eventId == eventId
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidId(eventId) && isAdmin();
+    }
+
+    // Invitations Collection (One-time initial & short-lived recovery tokens)
+    match /invitations/{tokenHash} {
+      allow get: if isValidHashId(tokenHash);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(tokenHash)
+        && isValidInvitation(incoming())
+        && isAdmin()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(tokenHash)
+        && isValidInvitation(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().status == 'pending'
+            && existing().expiresAt > request.time
+            && incoming().status == 'claimed'
+            && isValidHashId(incoming().participantKey)
+            && incoming().claimedAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'participantKey', 'claimedAt', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidHashId(tokenHash) && isAdmin();
+    }
+
+    // Participants Collection
+    match /participants/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidParticipant(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(incoming().eventId))
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.registrationOpen == true
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == false
+          )
+        );
+      allow update: if isValidHashId(participantKey)
+        && isValidParticipant(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().invitationHash == existing().invitationHash
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'address', 'hobbies', 'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // Time-Locked Giftee Matches (Server clock enforces gifteeRevealAt)
+    match /matches/{participantKey} {
+      allow get: if isValidHashId(participantKey) && (
+        isAdmin()
+        || (
+          exists(/databases/$(database)/documents/events/$(existing().eventId))
+          && get(/databases/$(database)/documents/events/$(existing().eventId)).data.gifteeRevealAt <= request.time
+        )
+      );
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidMatch(incoming())
+        && isAdmin()
+        && incoming().giverKey == participantKey
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(participantKey)
+        && isValidMatch(incoming())
+        && isAdmin()
+        && incoming().eventId == existing().eventId
+        && incoming().giverKey == existing().giverKey
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // Strictly Anonymous Incoming Assignment Handle (ZERO sender identity)
+    match /incomingAssignments/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create, update: if isValidHashId(participantKey)
+        && isValidIncomingAssignment(incoming())
+        && isAdmin()
+        && incoming().recipientKey == participantKey
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // Time-Locked Secret Santa Identity Reveals (Server clock strictly enforces santaIdentityRevealAt)
+    match /santaReveals/{participantKey} {
+      allow get: if isValidHashId(participantKey) && (
+        isAdmin()
+        || (
+          exists(/databases/$(database)/documents/events/$(existing().eventId))
+          && get(/databases/$(database)/documents/events/$(existing().eventId)).data.santaIdentityRevealAt <= request.time
+        )
+      );
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidSantaReveal(incoming())
+        && isAdmin()
+        && incoming().recipientKey == participantKey
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(participantKey)
+        && isValidSantaReveal(incoming())
+        && isAdmin()
+        && incoming().eventId == existing().eventId
+        && incoming().recipientKey == existing().recipientKey
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 1: Anonymous Santa Mailbox (Keyed by opaque 256-bit assignmentId)
+    match /anonymousConversations/{assignmentId} {
+      allow get: if isValidHashId(assignmentId);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(assignmentId)
+        && isValidConversation(incoming())
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || (
+            get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.mailboxEnabled == true
+          )
+        );
+      allow update: if isValidHashId(assignmentId)
+        && isValidConversation(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.mailboxEnabled == true
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'messageCount', 'unreadForSanta', 'unreadForRecipient', 'lastSenderRole', 'lastMessageAt', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidHashId(assignmentId) && isAdmin();
+
+      match /messages/{messageId} {
+        allow get: if isValidHashId(assignmentId) && isValidId(messageId);
+        allow list: if isValidHashId(assignmentId) && existing().assignmentId == assignmentId;
+        allow create: if isValidHashId(assignmentId)
+          && isValidId(messageId)
+          && isValidAnonymousMessage(incoming())
+          && incoming().assignmentId == assignmentId
+          && incoming().createdAt == request.time
+          && incoming().reported == false
+          && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+          && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
+          && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.mailboxEnabled == true
+          && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.mailboxOpenAt <= request.time
+          && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.mailboxCloseAt >= request.time;
+        allow update: if isValidHashId(assignmentId)
+          && isValidId(messageId)
+          && isValidAnonymousMessage(incoming())
+          && incoming().eventId == existing().eventId
+          && incoming().assignmentId == existing().assignmentId
+          && incoming().senderRole == existing().senderRole
+          && incoming().body == existing().body
+          && incoming().createdAt == existing().createdAt
+          && (
+            isAdmin()
+            || (
+              // Action: Mark read or report abuse
+              incoming().diff(existing()).affectedKeys().hasOnly(['readByOther', 'reported', 'reportReason'])
+            )
+          );
+        allow delete: if isValidHashId(assignmentId) && isValidId(messageId) && isAdmin();
+      }
+    }
+
+    // FEATURE 2: Guess Your Santa (Monotonic append-only, server enforces maxGuesses)
+    match /santaGuesses/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidSantaGuess(incoming())
+        && incoming().participantKey == participantKey
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.guessingEnabled == true
+        && incoming().guesses.size() <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.maxGuesses;
+      allow update: if isValidHashId(participantKey)
+        && isValidSantaGuess(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().participantKey == existing().participantKey
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.guessingEnabled == true
+            && incoming().guesses.size() >= existing().guesses.size()
+            && incoming().guesses.size() <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.maxGuesses
+            && incoming().diff(existing()).affectedKeys().hasOnly(['guesses', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 3: Santa's Delivery Express (Anonymous assignment-scoped checkpoints)
+    match /deliveryProgress/{assignmentId} {
+      allow get: if isValidHashId(assignmentId);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(assignmentId)
+        && isValidDeliveryProgress(incoming())
+        && incoming().assignmentId == assignmentId
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || (
+            get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.deliveryTrackingEnabled == true
+          )
+        );
+      allow update: if isValidHashId(assignmentId)
+        && isValidDeliveryProgress(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().assignmentId == existing().assignmentId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.deliveryTrackingEnabled == true
+            && incoming().diff(existing()).affectedKeys().hasOnly(['stage', 'history', 'sharedNote', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidHashId(assignmentId) && isAdmin();
+    }
+
+    // Sender-only Private Tracking Reference (Never visible to recipient)
+    match /deliveryPrivateTracking/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidPrivateTracking(incoming())
+        && incoming().participantKey == participantKey
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(participantKey)
+        && isValidPrivateTracking(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().participantKey == existing().participantKey
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['courierName', 'trackingCode', 'privateNote', 'updatedAt'])
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 11: Delivery Acknowledgment (Independent from sender progress)
+    match /deliveryAcknowledgments/{assignmentId} {
+      allow get: if isValidHashId(assignmentId);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(assignmentId)
+        && isValidDeliveryAck(incoming())
+        && incoming().assignmentId == assignmentId
+        && incoming().updatedAt == request.time
+        && incoming().adminCorrectionNote == ''
+        && incoming().correctedBy == ''
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
+        );
+      allow update: if isValidHashId(assignmentId)
+        && isValidDeliveryAck(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().assignmentId == existing().assignmentId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().status != 'received'
+            && incoming().adminCorrectionNote == existing().adminCorrectionNote
+            && incoming().correctedBy == existing().correctedBy
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'acknowledgedAt', 'problemSummary', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidHashId(assignmentId) && isAdmin();
+    }
+
+    // FEATURE 4: Daily Advent Surprises (Server clock prevents early door unlocks)
+    match /adventUnlocks/{unlockId} {
+      allow get: if isValidScopedId(unlockId);
+      allow list: if isAdmin();
+      allow create: if isValidScopedId(unlockId)
+        && isValidAdventUnlock(incoming())
+        && incoming().unlockedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.adventEnabled == true
+        && request.time >= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.adventStartAt + duration.value((incoming().day - 1) * 86400, 's');
+      allow update: if false;
+      allow delete: if isValidScopedId(unlockId) && isAdmin();
+    }
+
+    // FEATURE 5: Spin Santa's Wheel (Idempotent 1 spin per day — no updates allowed)
+    match /dailyWheelSpins/{spinId} {
+      allow get: if isValidScopedId(spinId);
+      allow list: if isAdmin();
+      allow create: if isValidScopedId(spinId)
+        && isValidWheelSpin(incoming())
+        && incoming().spunAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.wheelEnabled == true;
+      allow update: if false;
+      allow delete: if isValidScopedId(spinId) && isAdmin();
+    }
+
+    // FEATURE 6: Naughty or Nice Meter
+    match /quizResults/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidQuizResult(incoming())
+        && incoming().participantKey == participantKey
+        && incoming().completedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(participantKey)
+        && isValidQuizResult(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().participantKey == existing().participantKey
+        && incoming().completedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.quizAllowRetake == true
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'quizVersion', 'nicePercent', 'naughtyPercent', 'verdictTitle',
+              'verdictSubtitle', 'stampLabel', 'answers', 'completedAt'
+            ])
+          )
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 7: Find the Hidden Elf (Idempotent 1 discovery per day)
+    match /elfDiscoveries/{discoveryId} {
+      allow get: if isValidScopedId(discoveryId);
+      allow list: if isAdmin();
+      allow create: if isValidScopedId(discoveryId)
+        && isValidElfDiscovery(incoming())
+        && incoming().discoveredAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.elfChallengeEnabled == true;
+      allow update: if false;
+      allow delete: if isValidScopedId(discoveryId) && isAdmin();
+    }
+
+    // FEATURE 8: Gingerbread Studio
+    match /gingerbreadDesigns/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidGingerbread(incoming())
+        && incoming().participantKey == participantKey
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(participantKey)
+        && isValidGingerbread(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().participantKey == existing().participantKey
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'shape', 'icingColor', 'decorations', 'isPublicProfileDecor', 'updatedAt'
+          ])
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 10: Gift Dislikes & Restrictions (Cutoff enforced by server request.time)
+    match /giftPreferences/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidGiftPreferences(incoming())
+        && incoming().participantKey == participantKey
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || request.time <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.giftPreferencesCutoffAt
+        );
+      allow update: if isValidHashId(participantKey)
+        && isValidGiftPreferences(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().participantKey == existing().participantKey
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && request.time <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.giftPreferencesCutoffAt
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'dislikedCategories', 'dietaryRestrictions', 'dislikedColors', 'alreadyOwned',
+              'nonFoodNotes', 'generalNotes', 'shareWithSanta', 'shareDietaryWithSanta', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 13: Animated Thank-You Cards (Unlocked only after confirmed receipt)
+    match /thankYouCards/{assignmentId} {
+      allow get: if isValidHashId(assignmentId);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(assignmentId)
+        && isValidThankYouCard(incoming())
+        && incoming().assignmentId == assignmentId
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.thankYouEnabled == true
+        && exists(/databases/$(database)/documents/deliveryAcknowledgments/$(assignmentId))
+        && get(/databases/$(database)/documents/deliveryAcknowledgments/$(assignmentId)).data.status == 'received';
+      allow update: if isValidHashId(assignmentId) && isValidThankYouCard(incoming()) && isAdmin();
+      allow delete: if isValidHashId(assignmentId) && isAdmin();
+    }
+
+    // FEATURE 14: Interactive Snow Globe Decorations
+    match /snowGlobeDecorations/{participantKey} {
+      allow get: if isValidHashId(participantKey);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(participantKey)
+        && isValidSnowGlobe(incoming())
+        && incoming().participantKey == participantKey
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidHashId(participantKey)
+        && isValidSnowGlobe(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().participantKey == existing().participantKey
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['decorations', 'updatedAt'])
+        );
+      allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 12: Secure Session Recovery Requests & Admin Audit Logs
+    match /recoveryRequests/{requestId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(requestId)
+        && isValidRecoveryRequest(incoming())
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+      allow update: if isValidId(requestId)
+        && isValidRecoveryRequest(incoming())
+        && isAdmin()
+        && incoming().eventId == existing().eventId
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isValidId(requestId) && isAdmin();
+    }
+
+    match /recoveryAuditLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(logId)
+        && isValidRecoveryAuditLog(incoming())
+        && isAdmin()
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}
