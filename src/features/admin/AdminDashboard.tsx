@@ -9,12 +9,15 @@ import {
   Copy,
   FlaskConical,
   KeyRound,
+  LayoutDashboard,
   LifeBuoy,
   Link2,
   LogIn,
   LogOut,
   Mail,
   RefreshCw,
+  ScrollText,
+  Settings,
   ShieldCheck,
   Shuffle,
   Sliders,
@@ -72,6 +75,17 @@ import { BUDGET_PRESETS } from '../../data/workshopContent';
 import { formatBudgetGuide } from '../../utils/workshopLogic';
 import { AvatarGraphic } from '../../components/avatars/AvatarGraphic';
 import { playChimeSound, playPopSound } from '../../utils/sound';
+import { PlatformUser } from '../../types/rbac';
+import {
+  ensureDefaultEventSyncedToGroup,
+  listAllGroupsAdmin,
+  listPlatformUsers,
+  registerOrPromoteUserByEmail,
+  syncSignedInPlatformUser,
+} from '../../services/rbacService';
+import { ROLE_META } from '../../utils/rbacLogic';
+import { AdminGovernancePanels, GovernanceTabId } from './AdminGovernancePanels';
+import { OrganiserDashboard } from '../organiser/OrganiserDashboard';
 // PRE-PUBLISH TESTING ONLY — remove import & tab before publishing
 import { AdminTestingResetPanel } from './AdminTestingResetPanel';
 
@@ -80,6 +94,7 @@ interface AdminDashboardProps {
   isLiveEvent: boolean;
   onClose: () => void;
   onEventUpdated: () => Promise<void>;
+  onSelectActiveGroup?: (groupId: string) => void;
 }
 
 function toDatetimeLocalValue(date: Date): string {
@@ -94,13 +109,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   isLiveEvent,
   onClose,
   onEventUpdated,
+  onSelectActiveGroup,
 }) => {
+  const activeEventId = event.id || DEFAULT_EVENT_ID;
   const [adminUser, setAdminUser] = useState<User | null>(auth.currentUser);
+  const [platformUser, setPlatformUser] = useState<PlatformUser | null>(null);
   const [checkingAccess, setCheckingAccess] = useState(Boolean(auth.currentUser));
   const [isAuthorizedAdmin, setIsAuthorizedAdmin] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    'timers' | 'workshop' | 'invites' | 'participants' | 'recovery' | 'admins' | 'testing'
-  >('timers');
+    | GovernanceTabId
+    | 'timers'
+    | 'workshop'
+    | 'invites'
+    | 'participants'
+    | 'recovery'
+    | 'admins'
+    | 'testing'
+  >('overview');
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{
     type: 'ok' | 'err';
@@ -169,6 +194,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newCoAdminEmail, setNewCoAdminEmail] = useState('');
   const [newCoAdminName, setNewCoAdminName] = useState('');
   const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [promoteParticipantTarget, setPromoteParticipantTarget] =
+    useState<ParticipantProfile | null>(null);
+  const [promoteParticipantEmail, setPromoteParticipantEmail] = useState('');
+  const [promoteParticipantGrantActiveGroup, setPromoteParticipantGrantActiveGroup] =
+    useState(true);
 
   const reportError = useCallback((err: unknown, fallback: string) => {
     const formatted = formatFriendlyFirestoreError(err, fallback);
@@ -188,14 +218,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   useEffect(() => {
     let active = true;
     if (!adminUser) {
+      setPlatformUser(null);
       setIsAuthorizedAdmin(false);
       setCheckingAccess(false);
       return;
     }
     setCheckingAccess(true);
-    checkIsAuthorizedAdmin(adminUser.uid, adminUser.email, adminUser.emailVerified)
-      .then((allowed) => {
-        if (active) setIsAuthorizedAdmin(allowed);
+    Promise.all([
+      checkIsAuthorizedAdmin(adminUser.uid, adminUser.email, adminUser.emailVerified),
+      syncSignedInPlatformUser(adminUser).catch(() => null),
+    ])
+      .then(([allowed, pUser]) => {
+        if (!active) return;
+        setPlatformUser(pUser);
+        setIsAuthorizedAdmin(allowed || (pUser?.role === 'ADMIN' && pUser?.status === 'ACTIVE'));
       })
       .finally(() => {
         if (active) setCheckingAccess(false);
@@ -209,12 +245,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!isAuthorizedAdmin) return;
     try {
       const [inv, parts, admins, recReqs, acks, audits] = await Promise.all([
-        listInvitations(DEFAULT_EVENT_ID),
-        listParticipants(DEFAULT_EVENT_ID),
+        listInvitations(activeEventId),
+        listParticipants(activeEventId),
         listAdminAccounts(),
-        listRecoveryRequests(DEFAULT_EVENT_ID).catch(() => []),
-        listDeliveryAcknowledgmentsAdmin(DEFAULT_EVENT_ID).catch(() => []),
-        listRecoveryAuditLogs(DEFAULT_EVENT_ID).catch(() => []),
+        listRecoveryRequests(activeEventId).catch(() => []),
+        listDeliveryAcknowledgmentsAdmin(activeEventId).catch(() => []),
+        listRecoveryAuditLogs(activeEventId).catch(() => []),
       ]);
       setInvitations(inv);
       setParticipants(parts);
@@ -225,11 +261,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } catch (err) {
       reportError(err, 'Unable to load organizer data from Firestore.');
     }
-  }, [isAuthorizedAdmin, reportError]);
+  }, [activeEventId, isAuthorizedAdmin, reportError]);
 
   useEffect(() => {
     void loadAdminLists();
   }, [loadAdminLists]);
+
+  // Keep event form synced when switching active groups
+  useEffect(() => {
+    setEventName(event.name);
+    setTimezone(event.timezone || 'Asia/Kolkata');
+    setRegistrationOpen(event.registrationOpen);
+    setRegistrationDeadline(toDatetimeLocalValue(event.registrationDeadline));
+    setGifteeRevealAt(toDatetimeLocalValue(event.gifteeRevealAt));
+    setGiftDeadline(toDatetimeLocalValue(event.giftDeadline));
+    setSantaIdentityRevealAt(toDatetimeLocalValue(event.santaIdentityRevealAt));
+    setBudgetMode(event.budget.mode);
+    setBudgetCurrency(event.budget.currency || '₹');
+    setBudgetMin(event.budget.minAmount);
+    setBudgetMax(event.budget.maxAmount);
+    setBudgetAnnouncement(event.budget.announcement || '');
+  }, [event]);
 
   const handleGoogleSignIn = async () => {
     setStatusMsg(null);
@@ -253,7 +305,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const parsedMax =
         budgetMode === 'fixed' ? parsedMin : Math.max(parsedMin, Number(budgetMax) || parsedMin);
       await saveAdminEventConfig(adminUser.uid, {
-        eventId: DEFAULT_EVENT_ID,
+        eventId: activeEventId,
         name: eventName,
         timezone,
         registrationOpen,
@@ -313,7 +365,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStatusMsg(null);
     try {
       const res = await issueRecoveryInvitation({
-        eventId: DEFAULT_EVENT_ID,
+        eventId: activeEventId,
         targetParticipant: target,
         actorEmail: adminUser.email || 'admin',
         reasonNote: recoveryReasonNote || 'Organizer verified participant out-of-band.',
@@ -341,7 +393,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       await dismissRecoveryRequest(
         req.id,
-        DEFAULT_EVENT_ID,
+        activeEventId,
         adminUser.email || 'admin',
         req.requestedName
       );
@@ -364,7 +416,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       await adminCorrectDeliveryAcknowledgment({
         assignmentId: ack.assignmentId,
-        eventId: DEFAULT_EVENT_ID,
+        eventId: activeEventId,
         newStatus,
         correctionNote: `Organizer updated delivery confirmation status to "${newStatus}".`,
         actorEmail: adminUser.email || 'admin',
@@ -416,7 +468,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStatusMsg(null);
     try {
       const res = await generatePersonalInvitation(
-        DEFAULT_EVENT_ID,
+        activeEventId,
         inviteLabel || 'Secret Santa Guest'
       );
       setLastGeneratedLink(res.inviteUrl);
@@ -445,7 +497,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setBusy(true);
     setStatusMsg(null);
     try {
-      const added = await seedFestiveParticipants(DEFAULT_EVENT_ID);
+      const added = await seedFestiveParticipants(activeEventId);
       await loadAdminLists();
       playPopSound();
       setStatusMsg({
@@ -463,7 +515,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setBusy(true);
     setStatusMsg(null);
     try {
-      const res = await runCryptographicMatching(DEFAULT_EVENT_ID);
+      const res = await runCryptographicMatching(activeEventId);
       await onEventUpdated();
       await loadAdminLists();
       playChimeSound();
@@ -482,7 +534,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setBusy(true);
     setStatusMsg(null);
     try {
-      await resetMatchesForTesting(DEFAULT_EVENT_ID);
+      await resetMatchesForTesting(activeEventId);
       await onEventUpdated();
       await loadAdminLists();
       setStatusMsg({
@@ -500,7 +552,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setBusy(true);
     setStatusMsg(null);
     try {
-      const result = await clearAllParticipantsAndMatches(DEFAULT_EVENT_ID);
+      const result = await clearAllParticipantsAndMatches(activeEventId);
       setConfirmClearAll(false);
       await onEventUpdated();
       await loadAdminLists();
@@ -555,6 +607,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleMakeParticipantOrganiser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminUser || !promoteParticipantTarget || !promoteParticipantEmail.trim()) return;
+    setBusy(true);
+    setStatusMsg(null);
+    try {
+      const effectiveActor: PlatformUser = {
+        id: platformUser?.id || adminUser.uid,
+        email: platformUser?.email || adminUser.email || BOOTSTRAPPED_ADMIN_EMAIL,
+        displayName: platformUser?.displayName || adminUser.displayName || 'Supreme Santa',
+        role: 'ADMIN',
+        status: 'ACTIVE',
+        createdAt: platformUser?.createdAt || new Date(),
+        updatedAt: new Date(),
+      };
+      await ensureDefaultEventSyncedToGroup(effectiveActor).catch(() => null);
+      const [allUsers, allGroups] = await Promise.all([
+        listPlatformUsers().catch(() => []),
+        listAllGroupsAdmin().catch(() => []),
+      ]);
+      const grantGroupIds =
+        promoteParticipantGrantActiveGroup && allGroups.some((g) => g.id === activeEventId)
+          ? [activeEventId]
+          : [];
+      const created = await registerOrPromoteUserByEmail({
+        actor: effectiveActor,
+        email: promoteParticipantEmail,
+        displayName: promoteParticipantTarget.name,
+        role: 'ORGANISER',
+        initialGroupIds: grantGroupIds,
+        allUsers,
+        allGroups,
+        reason: `Promoted participant "${promoteParticipantTarget.name}" to Head Elf Organiser.`,
+      });
+      setPromoteParticipantTarget(null);
+      setPromoteParticipantEmail('');
+      playChimeSound();
+      setStatusMsg({
+        type: 'ok',
+        text: `${created.displayName} (${created.email}) is now a Head Elf Organiser 🧝${
+          grantGroupIds.length > 0 ? ` with management access to "${event.name}"` : ''
+        }. They can sign in with Google in the Console to manage groups.`,
+      });
+    } catch (err) {
+      reportError(err, 'Could not grant Head Elf Organiser access.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
@@ -572,7 +674,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="flex items-center gap-2.5">
             <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
             <h2 className="font-display text-lg sm:text-xl font-bold whitespace-nowrap">
-              Secret Santa Admin Console
+              {isAuthorizedAdmin
+                ? '🎅 Supreme Santa Admin Console'
+                : platformUser?.role === 'ORGANISER'
+                  ? '🧝 Head Elf Organiser Console'
+                  : 'Secret Santa Console'}
             </h2>
           </div>
 
@@ -590,7 +696,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close Admin Console"
+              aria-label="Close Console"
               className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -598,7 +704,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* Auth Gate or Admin Workspace */}
+        {/* Auth Gate or Role-Scoped Workspace */}
         {!adminUser ? (
           <div className="p-8 sm:p-12 text-center space-y-5 max-w-md mx-auto">
             <div className="w-16 h-16 mx-auto rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center">
@@ -606,11 +712,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <div className="space-y-2">
               <h3 className="font-display text-2xl font-bold text-slate-900">
-                Organizer Sign-In Required
+                Sign In to Secret Santa Console
               </h3>
               <p className="text-sm text-slate-600 leading-relaxed">
-                Sign in with your organizer Google account ({BOOTSTRAPPED_ADMIN_EMAIL}) to manage
-                reveal timers, generate 256-bit invitation links, and execute cryptographic matching.
+                Sign in with Google to access your Supreme Santa Admin or Head Elf Organiser tools,
+                or register your account so an Admin can promote you to Head Elf.
               </p>
             </div>
             <button
@@ -627,77 +733,156 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="p-10 text-center space-y-3">
             <RefreshCw className="w-7 h-7 mx-auto text-slate-400 animate-spin" />
             <p className="text-sm font-semibold text-slate-600">
-              Verifying organizer access for {adminUser.email}...
+              Checking role permissions for {adminUser.email}...
             </p>
           </div>
-        ) : !isAuthorizedAdmin ? (
+        ) : platformUser?.status === 'SUSPENDED' ? (
           <div className="p-8 text-center space-y-4 max-w-md mx-auto">
             <h3 className="font-display text-2xl font-bold text-rose-700">
-              Admin Access Restricted
+              Account Suspended
             </h3>
             <p className="text-sm text-slate-600 leading-relaxed">
-              Signed in as <span className="font-semibold">{adminUser.email}</span>. Ask the primary
-              organizer ({BOOTSTRAPPED_ADMIN_EMAIL}) to add your email in the{' '}
-              <span className="font-semibold">Co-Admins</span> tab, or switch to an authorized account.
+              Your account ({adminUser.email}) is currently suspended by a Supreme Santa Admin.
+              Please contact your organizer if you believe this is a mistake.
             </p>
             <button
               type="button"
               onClick={() => void signOutAdmin()}
               className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold cursor-pointer"
             >
-              Switch Account
+              Sign Out
             </button>
+          </div>
+        ) : !isAuthorizedAdmin && platformUser?.role === 'ORGANISER' ? (
+          <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+            <OrganiserDashboard
+              actor={platformUser}
+              initialGroupId={activeEventId}
+              onOpenGroupInApp={(groupId) => {
+                onSelectActiveGroup?.(groupId);
+                onClose();
+              }}
+            />
+          </div>
+        ) : !isAuthorizedAdmin ? (
+          <div className="p-8 text-center space-y-4 max-w-md mx-auto">
+            <div className="text-4xl">{ROLE_META.PARTICIPANT.emoji}</div>
+            <h3 className="font-display text-2xl font-bold text-slate-900">
+              Signed in as Secret Santa Participant
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Welcome, <span className="font-semibold">{adminUser.displayName || adminUser.email}</span>!
+              Your account is registered as a <strong>Participant — Secret Santa</strong>. Ask a
+              Supreme Santa Admin ({BOOTSTRAPPED_ADMIN_EMAIL}) to promote you to{' '}
+              <strong>Head Elf Organiser 🧝</strong> in <em>Users &amp; Roles</em> if you&apos;d
+              like to create and manage Secret Santa groups.
+            </p>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-semibold cursor-pointer"
+              >
+                Back to Secret Santa
+              </button>
+              <button
+                type="button"
+                onClick={() => void signOutAdmin()}
+                className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold cursor-pointer"
+              >
+                Switch Account
+              </button>
+            </div>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
-            {/* Tabs */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
-              <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-                {[
-                  { id: 'timers' as const, label: 'Timers & Event', icon: Clock },
-                  { id: 'workshop' as const, label: 'Budget & Workshop', icon: Sliders },
-                  { id: 'invites' as const, label: `Invitations (${invitations.length})`, icon: Link2 },
-                  { id: 'participants' as const, label: `Participants (${participants.length})`, icon: Users },
-                  {
-                    id: 'recovery' as const,
-                    label: `Recovery & Delivery (${
-                      recoveryRequests.filter((r) => r.status === 'pending').length +
-                      deliveryAcks.filter((a) => a.status === 'problem').length
-                    })`,
-                    icon: LifeBuoy,
-                  },
-                  { id: 'admins' as const, label: `Co-Admins (${adminAccounts.length + 1})`, icon: UserCheck },
-                  // PRE-PUBLISH TESTING ONLY — remove tab before publishing
-                  { id: 'testing' as const, label: 'Testing Resets', icon: FlaskConical },
-                ].map((tab) => {
-                  const Icon = tab.icon;
-                  const active = activeTab === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setActiveTab(tab.id)}
-                      className={`min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
-                        active
-                          ? 'bg-white text-slate-900 shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                      {tab.label}
-                    </button>
-                  );
-                })}
+            {/* Supreme Santa Navigation: Platform Governance + Active Group Operations */}
+            <div className="space-y-2.5 border-b border-slate-200 pb-3.5">
+              {/* Row 1: Platform Governance */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/5 p-1 rounded-xl">
+                  {[
+                    { id: 'overview' as const, label: 'Overview', icon: LayoutDashboard },
+                    { id: 'all-groups' as const, label: 'All Groups', icon: Users },
+                    { id: 'users-roles' as const, label: 'Users & Roles', icon: UserCheck },
+                    { id: 'organiser-access' as const, label: 'Organiser Access', icon: KeyRound },
+                    { id: 'system-settings' as const, label: 'System Settings', icon: Settings },
+                    { id: 'audit-logs' as const, label: 'Audit Logs', icon: ScrollText },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    const active = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                          active
+                            ? 'bg-slate-900 text-white shadow-sm'
+                            : 'text-slate-700 hover:text-slate-950 hover:bg-white/70'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <span className="text-xs font-semibold text-slate-500">
+                  Active Group: <strong className="text-slate-900">{event.name}</strong>
+                </span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => void loadAdminLists()}
-                className="text-xs font-semibold text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 cursor-pointer"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                Refresh
-              </button>
+              {/* Row 2: Active Group Operations */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+                  {[
+                    { id: 'timers' as const, label: 'Timers & Event', icon: Clock },
+                    { id: 'workshop' as const, label: 'Budget & Workshop', icon: Sliders },
+                    { id: 'invites' as const, label: `Invitations (${invitations.length})`, icon: Link2 },
+                    { id: 'participants' as const, label: `Participants (${participants.length})`, icon: Users },
+                    {
+                      id: 'recovery' as const,
+                      label: `Recovery & Delivery (${
+                        recoveryRequests.filter((r) => r.status === 'pending').length +
+                        deliveryAcks.filter((a) => a.status === 'problem').length
+                      })`,
+                      icon: LifeBuoy,
+                    },
+                    { id: 'admins' as const, label: `Co-Admins (${adminAccounts.length + 1})`, icon: UserCheck },
+                    // PRE-PUBLISH TESTING ONLY — remove tab before publishing
+                    { id: 'testing' as const, label: 'Testing Resets', icon: FlaskConical },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    const active = activeTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+                          active
+                            ? 'bg-white text-slate-900 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void loadAdminLists()}
+                  className="text-xs font-semibold text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Refresh
+                </button>
+              </div>
             </div>
 
             {statusMsg && (
@@ -753,6 +938,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 )}
               </div>
+            )}
+
+            {/* PLATFORM GOVERNANCE TABS (ADMIN SUPREME SANTA) */}
+            {(activeTab === 'overview' ||
+              activeTab === 'all-groups' ||
+              activeTab === 'users-roles' ||
+              activeTab === 'organiser-access' ||
+              activeTab === 'system-settings' ||
+              activeTab === 'audit-logs') && (
+              <AdminGovernancePanels
+                actor={{
+                  id: platformUser?.id || adminUser.uid,
+                  email: platformUser?.email || adminUser.email || BOOTSTRAPPED_ADMIN_EMAIL,
+                  displayName: platformUser?.displayName || adminUser.displayName || 'Supreme Santa',
+                  photoURL: platformUser?.photoURL || adminUser.photoURL || '',
+                  role: 'ADMIN',
+                  status: 'ACTIVE',
+                  createdAt: platformUser?.createdAt || new Date(),
+                  updatedAt: platformUser?.updatedAt || new Date(),
+                }}
+                activeSubTab={activeTab}
+                activeEventId={activeEventId}
+                onSelectActiveGroup={(groupId) => {
+                  onSelectActiveGroup?.(groupId);
+                  setStatusMsg({
+                    type: 'ok',
+                    text: 'Switched active workspace to selected group.',
+                  });
+                }}
+                onNotice={(msg) => setStatusMsg(msg)}
+              />
             )}
 
             {/* TAB 1: TIMERS & EVENT */}
@@ -1342,33 +1558,152 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
                         </div>
 
-                        {!event.isMatched && (
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
-                            onClick={async () => {
-                              try {
-                                await removeParticipant(p.id);
-                                await loadAdminLists();
-                              } catch (err) {
-                                reportError(err, `Could not remove ${p.name}.`);
-                              }
+                            disabled={busy}
+                            onClick={() => {
+                              setPromoteParticipantTarget(p);
+                              setPromoteParticipantEmail('');
+                              setPromoteParticipantGrantActiveGroup(true);
                             }}
-                            aria-label={`Remove ${p.name}`}
-                            className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <UserCheck className="w-3.5 h-3.5" />
+                            Make Organiser
                           </button>
-                        )}
+
+                          {!event.isMatched && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await removeParticipant(p.id);
+                                  await loadAdminLists();
+                                } catch (err) {
+                                  reportError(err, `Could not remove ${p.name}.`);
+                                }
+                              }}
+                              aria-label={`Remove ${p.name}`}
+                              className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}
                 </div>
+
+                {/* Inline Modal: Grant Organiser Access to a Participant */}
+                {promoteParticipantTarget && (
+                  <div className="fixed inset-0 z-[60] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+                    <form
+                      onSubmit={handleMakeParticipantOrganiser}
+                      className="w-full max-w-md rounded-3xl bg-white text-slate-900 shadow-2xl p-6 space-y-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <h4 className="font-display text-lg font-bold text-slate-900">
+                            Make {promoteParticipantTarget.name} a Head Elf Organiser? 🧝
+                          </h4>
+                          <p className="text-xs text-slate-600 leading-relaxed">
+                            Enter their Google email below. They&apos;ll immediately gain Head Elf
+                            Organiser access when they sign in to the Secret Santa Console.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPromoteParticipantTarget(null)}
+                          className="p-1 text-slate-400 hover:text-slate-800 cursor-pointer"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Participant&apos;s Google Email *
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          autoFocus
+                          value={promoteParticipantEmail}
+                          onChange={(e) => setPromoteParticipantEmail(e.target.value)}
+                          placeholder="name@gmail.com"
+                          maxLength={160}
+                          className="w-full min-h-[42px] rounded-xl border border-slate-300 px-3 text-sm"
+                        />
+                      </div>
+
+                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={promoteParticipantGrantActiveGroup}
+                          onChange={(e) =>
+                            setPromoteParticipantGrantActiveGroup(e.target.checked)
+                          }
+                          className="w-4 h-4 accent-emerald-600"
+                        />
+                        <span>Also grant management access to &ldquo;{event.name}&rdquo;</span>
+                      </label>
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setPromoteParticipantTarget(null)}
+                          className="min-h-[40px] px-4 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={busy || !promoteParticipantEmail.trim()}
+                          className="min-h-[40px] px-5 rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <UserCheck className="w-4 h-4" />
+                          {busy ? 'Granting...' : 'Make Organiser'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
               </div>
             )}
 
             {/* TAB 3B: SESSION RECOVERY, DELIVERY ISSUES & AUDIT LOG */}
             {activeTab === 'recovery' && (
               <div className="space-y-6">
+                {/* Summary Strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                    <div className="text-[11px] font-semibold text-slate-500">Pending Recovery</div>
+                    <div className="font-mono-tabular text-xl font-bold text-amber-700 mt-0.5">
+                      {recoveryRequests.filter((r) => r.status === 'pending').length}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                    <div className="text-[11px] font-semibold text-slate-500">Gifts Confirmed</div>
+                    <div className="font-mono-tabular text-xl font-bold text-emerald-700 mt-0.5">
+                      {deliveryAcks.filter((a) => a.status === 'received').length}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                    <div className="text-[11px] font-semibold text-slate-500">Delivery Issues</div>
+                    <div className="font-mono-tabular text-xl font-bold text-rose-700 mt-0.5">
+                      {deliveryAcks.filter((a) => a.status === 'problem').length}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                    <div className="text-[11px] font-semibold text-slate-500">Audit Events</div>
+                    <div className="font-mono-tabular text-xl font-bold text-slate-900 mt-0.5">
+                      {auditLogs.length}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Direct 24h One-Time Recovery Link Issuer */}
                 <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3">
                   <div className="flex items-center gap-2">
@@ -1454,311 +1789,72 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       No participant recovery requests right now.
                     </p>
                   ) : (
-                    recoveryRequests.map((req) => (
-                      <div
-                        key={req.id}
-                        className="rounded-2xl border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3"
-                      >
-                        <div className="space-y-0.5 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-sm text-slate-900">
-                              {req.requestedName}
-                            </p>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                req.status === 'pending'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : req.status === 'resolved'
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-slate-100 text-slate-600'
-                              }`}
-                            >
-                              {req.status}
-                            </span>
-                          </div>
-                          {req.verificationHint && (
-                            <p className="text-xs text-slate-600">Hint: {req.verificationHint}</p>
-                          )}
-                          <p className="text-[11px] text-slate-400">
-                            {req.createdAt.toLocaleString()}
-                          </p>
-                        </div>
-
-                        {req.status === 'pending' && (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={busy || !recoveryTargetParticipantId}
-                              onClick={() =>
-                                void handleIssueRecoveryLink(recoveryTargetParticipantId, req.id)
-                              }
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-semibold cursor-pointer"
-                            >
-                              Issue Link to Selected Guest
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleDismissRecoveryRequest(req)}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* Delivery Acknowledgments & Problem Reports */}
-                <div className="space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <Truck className="w-4 h-4 text-indigo-600" />
-                    <h4 className="font-display font-bold text-sm text-slate-900">
-                      Recipient Delivery Acknowledgments ({deliveryAcks.length})
-                    </h4>
-                  </div>
-                  {deliveryAcks.length === 0 ? (
-                    <p className="text-xs text-slate-500 rounded-xl border border-slate-200 p-4 text-center">
-                      No recipient delivery confirmations or issue reports yet.
-                    </p>
-                  ) : (
-                    deliveryAcks.map((ack) => (
-                      <div
-                        key={ack.assignmentId}
-                        className={`rounded-2xl border p-3.5 flex flex-wrap items-center justify-between gap-3 ${
-                          ack.status === 'problem'
-                            ? 'border-rose-300 bg-rose-50/70'
-                            : 'border-slate-200 bg-white'
-                        }`}
-                      >
-                        <div className="space-y-0.5 min-w-0">
-                          <p className="font-mono-tabular text-xs font-bold text-slate-800">
-                            Assignment {ack.assignmentId.slice(0, 12)}… ·{' '}
-                            <span
-                              className={
-                                ack.status === 'received'
-                                  ? 'text-emerald-700'
-                                  : ack.status === 'problem'
-                                    ? 'text-rose-700'
-                                    : 'text-amber-700'
-                              }
-                            >
-                              {ack.status.toUpperCase()}
-                            </span>
-                          </p>
-                          {ack.problemSummary && (
-                            <p className="text-xs text-rose-800 font-medium">
-                              Reported Issue: {ack.problemSummary}
-                            </p>
-                          )}
-                          {ack.adminCorrectionNote && (
-                            <p className="text-[11px] text-slate-500">
-                              Corrected by {ack.correctedBy}: {ack.adminCorrectionNote}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          {ack.status !== 'received' && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleAdminCorrectAck(ack, 'received')}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer"
-                            >
-                              Mark Received
-                            </button>
-                          )}
-                          {ack.status !== 'pending' && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleAdminCorrectAck(ack, 'pending')}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold cursor-pointer"
-                            >
-                              Reset Pending
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {/* Immutable Recovery & Correction Audit Log */}
-                <div className="space-y-2">
-                  <h4 className="font-display font-bold text-sm text-slate-900">
-                    Immutable Audit Trail ({auditLogs.length})
-                  </h4>
-                  {auditLogs.length === 0 ? (
-                    <p className="text-xs text-slate-500">No audit entries recorded yet.</p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {auditLogs.map((log) => (
+                    recoveryRequests.map((req) => {
+                      const autoMatch = participants.find(
+                        (p) => p.name.trim().toLowerCase() === req.requestedName.trim().toLowerCase()
+                      );
+                      const resolvedTargetId = recoveryTargetParticipantId || autoMatch?.id || '';
+                      const resolvedTargetLabel = recoveryTargetParticipantId
+                        ? participants.find((p) => p.id === recoveryTargetParticipantId)?.name ||
+                          'Selected Guest'
+                        : autoMatch?.name || 'Select guest above';
+                      return (
                         <div
-                          key={log.id}
-                          className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2"
+                          key={req.id}
+                          className="rounded-2xl border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3"
                         >
-                          <div>
-                            <span className="font-bold text-slate-800">{log.action}</span> ·{' '}
-                            <span className="text-slate-700">{log.targetLabel}</span>
-                            {log.note && <span className="text-slate-500"> — {log.note}</span>}
-                          </div>
-                          <span className="text-[11px] text-slate-400 font-mono-tabular">
-                            {log.actorEmail} · {log.createdAt.toLocaleString()}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* TAB 3B: SESSION RECOVERY, DELIVERY ISSUES & AUDIT LOG */}
-            {activeTab === 'recovery' && (
-              <div className="space-y-6">
-                {/* Direct 24h One-Time Recovery Link Issuer */}
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <LifeBuoy className="w-4 h-4 text-rose-600" />
-                    <h3 className="font-display font-bold text-base text-slate-900">
-                      Issue 24-Hour One-Time Session Recovery Link
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-600">
-                    Restores a participant&apos;s exact profile, dislikes, collectibles, and Secret
-                    Santa matches onto a new device while automatically revoking their old link and
-                    writing an immutable audit entry.
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <select
-                      value={recoveryTargetParticipantId}
-                      onChange={(e) => setRecoveryTargetParticipantId(e.target.value)}
-                      className="min-h-[42px] rounded-xl border border-slate-300 bg-white px-3 text-sm"
-                    >
-                      <option value="">Select verified participant...</option>
-                      {participants.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.address.city || 'Guest'})
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      value={recoveryReasonNote}
-                      onChange={(e) => setRecoveryReasonNote(e.target.value)}
-                      placeholder="Verification note (e.g. Confirmed via WhatsApp)"
-                      maxLength={200}
-                      className="min-h-[42px] rounded-xl border border-slate-300 bg-white px-3 text-sm"
-                    />
-                    <button
-                      type="button"
-                      disabled={busy || !recoveryTargetParticipantId}
-                      onClick={() => void handleIssueRecoveryLink(recoveryTargetParticipantId)}
-                      className="min-h-[42px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-45 text-white text-xs sm:text-sm font-semibold cursor-pointer"
-                    >
-                      Generate 24h Recovery Link
-                    </button>
-                  </div>
-
-                  {lastRecoveryLink && (
-                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 space-y-2">
-                      <p className="text-xs font-bold text-emerald-900">
-                        Send this private 24-hour recovery link directly to the verified participant:
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 text-xs bg-white border border-emerald-200 rounded-lg px-2.5 py-2 break-all text-slate-800">
-                          {lastRecoveryLink}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            await navigator.clipboard.writeText(lastRecoveryLink);
-                            setCopiedRecoveryLink(true);
-                            window.setTimeout(() => setCopiedRecoveryLink(false), 2200);
-                          }}
-                          className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
-                        >
-                          {copiedRecoveryLink ? (
-                            <Check className="w-3.5 h-3.5" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                          {copiedRecoveryLink ? 'Copied' : 'Copy'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Incoming Recovery Requests Queue */}
-                <div className="space-y-2.5">
-                  <h4 className="font-display font-bold text-sm text-slate-900">
-                    Session Recovery Requests ({recoveryRequests.length})
-                  </h4>
-                  {recoveryRequests.length === 0 ? (
-                    <p className="text-xs text-slate-500 rounded-xl border border-slate-200 p-4 text-center">
-                      No participant recovery requests right now.
-                    </p>
-                  ) : (
-                    recoveryRequests.map((req) => (
-                      <div
-                        key={req.id}
-                        className="rounded-2xl border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3"
-                      >
-                        <div className="space-y-0.5 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-sm text-slate-900">
-                              {req.requestedName}
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-sm text-slate-900">
+                                {req.requestedName}
+                              </p>
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                  req.status === 'pending'
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : req.status === 'resolved'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-slate-100 text-slate-600'
+                                }`}
+                              >
+                                {req.status}
+                              </span>
+                            </div>
+                            {req.verificationHint && (
+                              <p className="text-xs text-slate-600">Hint: {req.verificationHint}</p>
+                            )}
+                            <p className="text-[11px] text-slate-400">
+                              {req.createdAt.toLocaleString()}
                             </p>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                req.status === 'pending'
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : req.status === 'resolved'
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-slate-100 text-slate-600'
-                              }`}
-                            >
-                              {req.status}
-                            </span>
                           </div>
-                          {req.verificationHint && (
-                            <p className="text-xs text-slate-600">Hint: {req.verificationHint}</p>
-                          )}
-                          <p className="text-[11px] text-slate-400">
-                            {req.createdAt.toLocaleString()}
-                          </p>
-                        </div>
 
-                        {req.status === 'pending' && (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={busy || !recoveryTargetParticipantId}
-                              onClick={() =>
-                                void handleIssueRecoveryLink(recoveryTargetParticipantId, req.id)
-                              }
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-semibold cursor-pointer"
-                            >
-                              Issue Link to Selected Guest
-                            </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleDismissRecoveryRequest(req)}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))
+                          {req.status === 'pending' && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={busy || !resolvedTargetId}
+                                onClick={() =>
+                                  void handleIssueRecoveryLink(resolvedTargetId, req.id)
+                                }
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white text-xs font-semibold cursor-pointer"
+                              >
+                                {resolvedTargetId
+                                  ? `Issue Link to ${resolvedTargetLabel}`
+                                  : 'Select Guest Above First'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void handleDismissRecoveryRequest(req)}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
 

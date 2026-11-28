@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Home, Shield, Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { Home, Shield, Sparkles, Users, Volume2, VolumeX } from 'lucide-react';
 import {
   AppStep,
   GenderCategory,
@@ -9,7 +9,7 @@ import {
   SecretSantaEvent,
   ThemeId,
 } from './types/secretSanta';
-import { DEFAULT_EVENT_ID } from './services/firebase';
+import { auth, DEFAULT_EVENT_ID } from './services/firebase';
 import {
   buildDefaultEventTemplate,
   fetchEvent,
@@ -37,10 +37,43 @@ import {
   readSandboxGoldenCrown,
 } from './services/workshopService';
 import { WORKSHOP_DATA_RESET_EVENT } from './services/adminTestingResetService';
+import { ParticipantGroupSummary } from './types/rbac';
+import { parseIncomingInviteLocation } from './utils/rbacLogic';
+import {
+  fetchSantaGroup,
+  readSavedParticipantGroups,
+  resolveGroupInviteLink,
+  saveParticipantGroupSession,
+  upsertGroupMembership,
+} from './services/rbacService';
+import { MyChristmasGroupsModal } from './features/groups/MyChristmasGroupsModal';
 
 const THEME_PREF_KEY = 'ss_theme_pref_v1';
+const ACTIVE_GROUP_STORE = 'ss_active_group_id_v2';
 const SESSION_KEY_STORE = 'ss_participant_session_key_v1';
 const SESSION_DRAFT_STORE = 'ss_participant_draft_v1';
+
+function groupSessionKeyStore(groupId: string): string {
+  return groupId === DEFAULT_EVENT_ID
+    ? SESSION_KEY_STORE
+    : `${SESSION_KEY_STORE}_${groupId}`;
+}
+
+function groupDraftStore(groupId: string): string {
+  return groupId === DEFAULT_EVENT_ID
+    ? SESSION_DRAFT_STORE
+    : `${SESSION_DRAFT_STORE}_${groupId}`;
+}
+
+function readInitialActiveGroupId(): string {
+  try {
+    const saved = window.sessionStorage.getItem(ACTIVE_GROUP_STORE);
+    if (saved && /^[a-zA-Z0-9_-]{1,128}$/.test(saved)) return saved;
+  } catch {
+    // ignore
+  }
+  return DEFAULT_EVENT_ID;
+}
 
 const EMPTY_ADDRESS: ParticipantAddress = {
   line1: '',
@@ -72,6 +105,9 @@ export default function App() {
   const [step, setStep] = useState<AppStep>('invitation');
   const [hubTab, setHubTab] = useState<'home' | 'workshop'>('home');
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showMyGroups, setShowMyGroups] = useState(false);
+  const [activeGroupId, setActiveGroupId] = useState<string>(readInitialActiveGroupId);
+  const [savedGroups, setSavedGroups] = useState<ParticipantGroupSummary[]>(readSavedParticipantGroups);
 
   // Live Firestore event state (falls back cleanly to default template before admin initializes)
   const [event, setEvent] = useState<SecretSantaEvent>(buildDefaultEventTemplate);
@@ -129,24 +165,80 @@ export default function App() {
     }
   };
 
-  // Subscribe to Firestore event schedule
+  // Subscribe to active group's Firestore event schedule
   useEffect(() => {
-    const unsub = subscribeToEvent(DEFAULT_EVENT_ID, (liveEvent) => {
+    try {
+      window.sessionStorage.setItem(ACTIVE_GROUP_STORE, activeGroupId);
+    } catch {
+      // ignore
+    }
+    const unsub = subscribeToEvent(activeGroupId, (liveEvent) => {
       if (liveEvent) {
         setEvent(liveEvent);
         setIsLiveFirestoreEvent(true);
       } else {
+        setEvent({ ...buildDefaultEventTemplate(), id: activeGroupId });
         setIsLiveFirestoreEvent(false);
       }
     });
     return () => unsub();
-  }, []);
+  }, [activeGroupId]);
 
   const refreshEvent = useCallback(async () => {
-    const live = await fetchEvent(DEFAULT_EVENT_ID);
+    const live = await fetchEvent(activeGroupId);
     if (live) {
       setEvent(live);
       setIsLiveFirestoreEvent(true);
+    }
+  }, [activeGroupId]);
+
+  const loadGroupSession = useCallback(async (targetGroupId: string) => {
+    setActiveGroupId(targetGroupId);
+    setInviteError(null);
+    const keyStore = groupSessionKeyStore(targetGroupId);
+    const draftStore = groupDraftStore(targetGroupId);
+
+    try {
+      const existingKey = window.sessionStorage.getItem(keyStore);
+      if (existingKey && /^[a-f0-9]{64}$/.test(existingKey)) {
+        setParticipantKey(existingKey);
+        const remoteProfile = await fetchParticipantProfile(existingKey);
+        if (remoteProfile && remoteProfile.eventId === targetGroupId) {
+          setParticipant(remoteProfile);
+          setSelectedAvatarId(remoteProfile.avatarId);
+          setGenderFilter(remoteProfile.genderPreference);
+          setTheme(remoteProfile.selectedTheme);
+          setInvitationHash(remoteProfile.invitationHash);
+          setStep(remoteProfile.hasJoined ? 'hub' : 'start');
+          return;
+        }
+        const draftRaw = window.sessionStorage.getItem(draftStore);
+        if (draftRaw) {
+          const parsedDraft = JSON.parse(draftRaw) as ParticipantProfile;
+          if (parsedDraft && parsedDraft.hasJoined && parsedDraft.eventId === targetGroupId) {
+            setParticipant(parsedDraft);
+            setSelectedAvatarId(parsedDraft.avatarId);
+            setStep('hub');
+            return;
+          }
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    // Fresh capability key for this group (never reuses another participant's identity)
+    const freshKey = await sha256Hex(generateSecureTokenHex(32));
+    setParticipantKey(freshKey);
+    setInvitationHash('');
+    setParticipant(null);
+    setInviteLabel(undefined);
+    setHasPersonalToken(false);
+    setStep('invitation');
+    try {
+      window.sessionStorage.setItem(keyStore, freshKey);
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -202,58 +294,109 @@ export default function App() {
     }
   }, [event.id, event.isMatched, isLiveFirestoreEvent, participant]);
 
-  // Process URL ?token=<256-bit-token> OR restore active browser-tab session
+  const handleParsedInvite = useCallback(
+    async (
+      parsed:
+        | { kind: 'personal'; token: string }
+        | { kind: 'group'; slug: string; code: string }
+    ) => {
+      if (parsed.kind === 'group') {
+        const res = await resolveGroupInviteLink(parsed.slug, parsed.code);
+        if (!res.ok) {
+          setInviteError(res.reason);
+          setStep('invitation');
+          return;
+        }
+        setTheme(res.group.theme);
+        setActiveGroupId(res.group.id);
+        setInviteError(null);
+        setInviteLabel(undefined);
+        setHasPersonalToken(false);
+
+        // If participant already joined this group in this session, resume cleanly;
+        // otherwise create a brand-new capability key (NEVER auto-authenticate as existing participant!)
+        const keyStore = groupSessionKeyStore(res.group.id);
+        const existingKey = window.sessionStorage.getItem(keyStore);
+        if (existingKey && /^[a-f0-9]{64}$/.test(existingKey)) {
+          const existingProfile = await fetchParticipantProfile(existingKey).catch(() => null);
+          if (existingProfile && existingProfile.eventId === res.group.id && existingProfile.hasJoined) {
+            setParticipantKey(existingKey);
+            setParticipant(existingProfile);
+            setSelectedAvatarId(existingProfile.avatarId);
+            setStep('hub');
+            return;
+          }
+        }
+        const freshKey = await sha256Hex(generateSecureTokenHex(32));
+        setParticipantKey(freshKey);
+        setParticipant(null);
+        setInvitationHash('');
+        try {
+          window.sessionStorage.setItem(keyStore, freshKey);
+        } catch {
+          // ignore
+        }
+        setStep('invitation');
+        return;
+      }
+
+      // Personal invitation link (/join?token=... or /?token=...)
+      setHasPersonalToken(true);
+      const claim = await validateAndClaimInvitation(parsed.token);
+      if (claim.ok && claim.participantKey && claim.tokenHash) {
+        const targetGroupId = claim.eventId || DEFAULT_EVENT_ID;
+        setActiveGroupId(targetGroupId);
+        setParticipantKey(claim.participantKey);
+        setInvitationHash(claim.tokenHash);
+        setInviteLabel(claim.label);
+        setInviteError(null);
+        try {
+          window.sessionStorage.setItem(groupSessionKeyStore(targetGroupId), claim.participantKey);
+        } catch {
+          // ignore
+        }
+        if (claim.isRecovery) {
+          try {
+            const restored = await fetchParticipantProfile(claim.participantKey);
+            if (restored) {
+              setParticipant(restored);
+              setSelectedAvatarId(restored.avatarId);
+              setGenderFilter(restored.genderPreference);
+              setTheme(restored.selectedTheme);
+              if (restored.hasJoined) {
+                setStep('hub');
+              }
+            }
+          } catch {
+            // Fall through to invitation screen if profile lookup fails
+          }
+        }
+      } else {
+        setInviteError(claim.reason || 'Could not validate your invitation link.');
+      }
+    },
+    []
+  );
+
+  // Process URL /g/{slug}/invite?code=..., /join?token=..., /?token=... OR restore active browser-tab session
   useEffect(() => {
     let mounted = true;
 
     async function bootstrapSession() {
-      const params = new URLSearchParams(window.location.search);
-      const urlToken = params.get('token');
+      const parsed = parseIncomingInviteLocation(window.location.pathname, window.location.search);
 
-      if (urlToken) {
-        setHasPersonalToken(true);
-        // Strip raw token immediately from browser address bar
-        window.history.replaceState({}, document.title, window.location.pathname);
-
-        const claim = await validateAndClaimInvitation(urlToken);
-        if (!mounted) return;
-        if (claim.ok && claim.participantKey && claim.tokenHash) {
-          setParticipantKey(claim.participantKey);
-          setInvitationHash(claim.tokenHash);
-          setInviteLabel(claim.label);
-          setInviteError(null);
-          try {
-            window.sessionStorage.setItem(SESSION_KEY_STORE, claim.participantKey);
-          } catch {
-            // ignore
-          }
-          // If this is a 24-hour recovery link, restore the existing participant profile straight to the Hub!
-          if (claim.isRecovery) {
-            try {
-              const restored = await fetchParticipantProfile(claim.participantKey);
-              if (!mounted) return;
-              if (restored) {
-                setParticipant(restored);
-                setSelectedAvatarId(restored.avatarId);
-                setGenderFilter(restored.genderPreference);
-                setTheme(restored.selectedTheme);
-                if (restored.hasJoined) {
-                  setStep('hub');
-                }
-              }
-            } catch {
-              // Fall through to invitation screen if profile lookup fails
-            }
-          }
-          return;
-        } else {
-          setInviteError(claim.reason || 'Could not validate your invitation link.');
-        }
+      if (parsed.kind !== 'none') {
+        // Strip raw invite token/code immediately from browser address bar
+        window.history.replaceState({}, document.title, '/');
+        await handleParsedInvite(parsed);
+        return;
       }
 
-      // Attempt to resume existing session within this browser tab
+      // Attempt to resume existing session for active group within this browser tab
+      const keyStore = groupSessionKeyStore(activeGroupId);
+      const draftStore = groupDraftStore(activeGroupId);
       try {
-        const existingKey = window.sessionStorage.getItem(SESSION_KEY_STORE);
+        const existingKey = window.sessionStorage.getItem(keyStore);
         if (existingKey && /^[a-f0-9]{64}$/.test(existingKey)) {
           setParticipantKey(existingKey);
           const remoteProfile = await fetchParticipantProfile(existingKey);
@@ -270,8 +413,7 @@ export default function App() {
             return;
           }
 
-          // Fallback to tab-scoped draft if event hasn't been initialized in Firestore yet
-          const draftRaw = window.sessionStorage.getItem(SESSION_DRAFT_STORE);
+          const draftRaw = window.sessionStorage.getItem(draftStore);
           if (draftRaw) {
             const parsedDraft = JSON.parse(draftRaw) as ParticipantProfile;
             if (parsedDraft && parsedDraft.hasJoined) {
@@ -286,12 +428,11 @@ export default function App() {
         // ignore storage errors
       }
 
-      // Generate a fresh 256-bit capability key for open exploration
       const freshKey = await sha256Hex(generateSecureTokenHex(32));
       if (!mounted) return;
       setParticipantKey(freshKey);
       try {
-        window.sessionStorage.setItem(SESSION_KEY_STORE, freshKey);
+        window.sessionStorage.setItem(keyStore, freshKey);
       } catch {
         // ignore
       }
@@ -301,40 +442,13 @@ export default function App() {
     return () => {
       mounted = false;
     };
+    // Run once on initial mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRedeemManualToken = async (rawToken: string) => {
     setInviteError(null);
-    const claim = await validateAndClaimInvitation(rawToken);
-    if (claim.ok && claim.participantKey && claim.tokenHash) {
-      setHasPersonalToken(true);
-      setParticipantKey(claim.participantKey);
-      setInvitationHash(claim.tokenHash);
-      setInviteLabel(claim.label);
-      try {
-        window.sessionStorage.setItem(SESSION_KEY_STORE, claim.participantKey);
-      } catch {
-        // ignore
-      }
-      if (claim.isRecovery) {
-        try {
-          const restored = await fetchParticipantProfile(claim.participantKey);
-          if (restored) {
-            setParticipant(restored);
-            setSelectedAvatarId(restored.avatarId);
-            setGenderFilter(restored.genderPreference);
-            setTheme(restored.selectedTheme);
-            if (restored.hasJoined) {
-              setStep('hub');
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-    } else {
-      setInviteError(claim.reason || 'Invalid or expired invitation token.');
-    }
+    await handleParsedInvite({ kind: 'personal', token: rawToken });
   };
 
   const handleSaveDetails = async (formData: {
@@ -345,10 +459,12 @@ export default function App() {
     setSavingProfile(true);
     try {
       const key = participantKey || (await sha256Hex(generateSecureTokenHex(32)));
+      const keyStore = groupSessionKeyStore(event.id);
+      const draftStore = groupDraftStore(event.id);
       if (!participantKey) {
         setParticipantKey(key);
         try {
-          window.sessionStorage.setItem(SESSION_KEY_STORE, key);
+          window.sessionStorage.setItem(keyStore, key);
         } catch {
           // ignore
         }
@@ -379,13 +495,38 @@ export default function App() {
           selectedTheme: nextProfile.selectedTheme,
           hasJoined: true,
         });
+        await upsertGroupMembership(event.id, nextProfile, auth.currentUser?.uid || '');
       }
 
       try {
-        window.sessionStorage.setItem(SESSION_DRAFT_STORE, JSON.stringify(nextProfile));
+        window.sessionStorage.setItem(draftStore, JSON.stringify(nextProfile));
       } catch {
         // ignore
       }
+
+      // Record group in participant's "My Christmas Groups" multi-group index
+      const remoteGrp = await fetchSantaGroup(event.id).catch(() => null);
+      const updatedSummaries = saveParticipantGroupSession({
+        groupId: event.id,
+        slug: remoteGrp?.slug || event.id,
+        name: remoteGrp?.name || event.name,
+        theme: remoteGrp?.theme || theme,
+        status:
+          remoteGrp?.status ||
+          (event.isMatched
+            ? 'MATCHED'
+            : event.registrationOpen
+              ? 'REGISTRATION_OPEN'
+              : 'REGISTRATION_CLOSED'),
+        participantKey: key,
+        participantName: nextProfile.name,
+        avatarId: nextProfile.avatarId,
+        isMatched: event.isMatched,
+        recipientRevealAt: event.gifteeRevealAt,
+        senderRevealAt: event.santaIdentityRevealAt,
+        joinedAt: new Date(),
+      });
+      setSavedGroups(updatedSummaries);
 
       setParticipant(nextProfile);
       setJustJoinedCelebration(true);
@@ -563,11 +704,28 @@ export default function App() {
 
               <button
                 type="button"
+                onClick={() => {
+                  playPopSound();
+                  setShowMyGroups(true);
+                }}
+                className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-black/35 hover:bg-black/50 backdrop-blur-md border border-white/20 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Users className="w-3.5 h-3.5 text-emerald-300" />
+                <span className="hidden sm:inline">My Groups</span>
+                {savedGroups.length > 0 && (
+                  <span className="font-mono-tabular text-[11px] bg-white/20 px-1.5 py-0.5 rounded-full">
+                    {savedGroups.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowAdmin(true)}
                 className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-black/35 hover:bg-black/50 backdrop-blur-md border border-white/20 text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Shield className="w-3.5 h-3.5 text-amber-300" />
-                Admin
+                Console
               </button>
             </div>
           </header>
@@ -701,13 +859,32 @@ export default function App() {
         />
       )}
 
-      {/* Secure Admin Dashboard Modal */}
+      {/* My Christmas Groups Multi-Group Switcher Modal */}
+      {showMyGroups && (
+        <MyChristmasGroupsModal
+          activeGroupId={activeGroupId}
+          savedGroups={savedGroups}
+          currentUserId={auth.currentUser?.uid || ''}
+          currentParticipantName={participant?.name || ''}
+          onSelectGroup={(groupId) => {
+            void loadGroupSession(groupId);
+          }}
+          onJoinViaParsedInvite={handleParsedInvite}
+          onGroupsChanged={() => setSavedGroups(readSavedParticipantGroups())}
+          onClose={() => setShowMyGroups(false)}
+        />
+      )}
+
+      {/* Role-Aware Admin (Supreme Santa) & Organiser (Head Elf) Console Modal */}
       {showAdmin && (
         <AdminDashboard
           event={event}
           isLiveEvent={isLiveFirestoreEvent}
           onClose={() => setShowAdmin(false)}
           onEventUpdated={refreshEvent}
+          onSelectActiveGroup={(groupId) => {
+            void loadGroupSession(groupId);
+          }}
         />
       )}
     </ErrorBoundary>

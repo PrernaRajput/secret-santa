@@ -30,13 +30,64 @@ service cloud.firestore {
         && request.auth.token.email.lower() == 'prernarajput09.cs@gmail.com';
     }
 
+    function hasActivePlatformRole(roleName) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == roleName
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'ACTIVE';
+    }
+
     function isAdmin() {
-      return isBootstrappedAdmin() || (
-        isSignedIn() && (
-          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      return isBootstrappedAdmin()
+        || hasActivePlatformRole('ADMIN')
+        || (
+          isSignedIn() && (
+            exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+            || (
+              request.auth.token.email is string
+              && exists(/databases/$(database)/documents/admins/$(callerEmailHash()))
+            )
+          )
+        );
+    }
+
+    function isActiveOrganiser() {
+      return hasActivePlatformRole('ORGANISER');
+    }
+
+    function canManageGroup(groupId) {
+      return isAdmin() || (
+        isActiveOrganiser() && (
+          (
+            exists(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid))
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid)).data.active == true
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid)).data.role in ['OWNER', 'MANAGER']
+          )
           || (
             request.auth.token.email is string
-            && exists(/databases/$(database)/documents/admins/$(callerEmailHash()))
+            && exists(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash()))
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash())).data.active == true
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash())).data.role in ['OWNER', 'MANAGER']
+          )
+        )
+      );
+    }
+
+    function hasGroupPermission(groupId, perm) {
+      return isAdmin() || (
+        isActiveOrganiser() && (
+          (
+            exists(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid))
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid)).data.active == true
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid)).data.role in ['OWNER', 'MANAGER']
+            && perm in get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(request.auth.uid)).data.permissions
+          )
+          || (
+            request.auth.token.email is string
+            && exists(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash()))
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash())).data.active == true
+            && get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash())).data.role in ['OWNER', 'MANAGER']
+            && perm in get(/databases/$(database)/documents/groups/$(groupId)/managementGrants/$(callerEmailHash())).data.permissions
           )
         )
       );
@@ -93,9 +144,10 @@ service cloud.firestore {
     function isValidBudget(budget) {
       return budget is map
         && budget.keys().hasAll(['mode', 'currency', 'minAmount', 'maxAmount', 'announcement'])
-        && budget.keys().hasOnly(['mode', 'currency', 'minAmount', 'maxAmount', 'announcement'])
+        && budget.keys().hasOnly(['mode', 'currency', 'currencyCode', 'minAmount', 'maxAmount', 'announcement'])
         && budget.mode in ['fixed', 'range']
         && isValidNonEmptyString(budget.currency, 1, 8)
+        && (!('currencyCode' in budget) || budget.currencyCode in ['INR', 'USD', 'GBP'])
         && budget.minAmount is int && budget.minAmount >= 0 && budget.minAmount <= 1000000
         && budget.maxAmount is int && budget.maxAmount >= budget.minAmount && budget.maxAmount <= 1000000
         && isValidOptionalString(budget.announcement, 240);
@@ -108,6 +160,211 @@ service cloud.firestore {
         && data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
         && isValidOptionalString(data.displayName, 100)
         && data.createdAt is timestamp;
+    }
+
+    function isValidPlatformUser(data) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'displayName', 'photoURL', 'role', 'status', 'createdAt', 'updatedAt'])
+        && isValidNonEmptyString(data.email, 5, 160)
+        && data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
+        && isValidNonEmptyString(data.displayName, 1, 100)
+        && (!('photoURL' in data) || isValidOptionalString(data.photoURL, 400))
+        && data.role in ['ADMIN', 'ORGANISER', 'PARTICIPANT']
+        && data.status in ['ACTIVE', 'SUSPENDED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPlatformConfig(data) {
+      return data.keys().hasAll([
+          'maxGroupsPerOrganiser', 'defaultMaxParticipants', 'permittedBudgetMin', 'permittedBudgetMax',
+          'defaultTimezone', 'defaultCurrency', 'allowDiscoverableGroups', 'globalGamesEnabled',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'maxGroupsPerOrganiser', 'defaultMaxParticipants', 'permittedBudgetMin', 'permittedBudgetMax',
+          'defaultTimezone', 'defaultCurrency', 'allowDiscoverableGroups', 'globalGamesEnabled',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.maxGroupsPerOrganiser is int && data.maxGroupsPerOrganiser >= 1 && data.maxGroupsPerOrganiser <= 100
+        && data.defaultMaxParticipants is int && data.defaultMaxParticipants >= 2 && data.defaultMaxParticipants <= 500
+        && data.permittedBudgetMin is int && data.permittedBudgetMin >= 0 && data.permittedBudgetMin <= 1000000
+        && data.permittedBudgetMax is int && data.permittedBudgetMax >= data.permittedBudgetMin && data.permittedBudgetMax <= 1000000
+        && isValidNonEmptyString(data.defaultTimezone, 2, 64)
+        && data.defaultCurrency in ['INR', 'USD', 'GBP']
+        && data.allowDiscoverableGroups is bool
+        && data.globalGamesEnabled is map
+        && isValidNonEmptyString(data.updatedBy, 2, 160)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSantaGroup(data) {
+      return data.keys().hasAll([
+          'slug', 'name', 'description', 'theme', 'visibility', 'maxParticipants', 'budget',
+          'timezone', 'registrationDeadline', 'matchingAt', 'recipientRevealAt', 'giftExchangeAt',
+          'exchangeMode', 'exchangeLocation', 'pairingExclusions', 'gamesConfig', 'inviteCode',
+          'status', 'createdBy', 'ownerId', 'ownerDisplayName', 'managerIds', 'memberCount',
+          'invitedCount', 'isMatched', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'slug', 'name', 'description', 'theme', 'visibility', 'maxParticipants', 'budget',
+          'timezone', 'registrationDeadline', 'matchingAt', 'recipientRevealAt', 'senderRevealAt',
+          'giftExchangeAt', 'exchangeMode', 'exchangeLocation', 'pairingExclusions', 'gamesConfig',
+          'inviteCode', 'inviteCodeRevokedAt', 'status', 'createdBy', 'ownerId', 'ownerDisplayName',
+          'managerIds', 'memberCount', 'invitedCount', 'isMatched', 'matchedAt', 'createdAt', 'updatedAt'
+        ])
+        && isValidNonEmptyString(data.slug, 2, 64)
+        && data.slug.matches('^[a-z0-9\\-]+$')
+        && isValidNonEmptyString(data.name, 2, 120)
+        && isValidOptionalString(data.description, 400)
+        && data.theme in ['santa', 'chocolate', 'funny']
+        && data.visibility in ['private', 'discoverable']
+        && data.maxParticipants is int && data.maxParticipants >= 2 && data.maxParticipants <= 500
+        && isValidBudget(data.budget)
+        && isValidNonEmptyString(data.timezone, 2, 64)
+        && data.registrationDeadline is timestamp
+        && data.matchingAt is timestamp
+        && data.recipientRevealAt is timestamp
+        && (!('senderRevealAt' in data) || data.senderRevealAt == null || data.senderRevealAt is timestamp)
+        && data.giftExchangeAt is timestamp
+        && data.exchangeMode in ['delivery', 'in-person', 'hybrid']
+        && isValidOptionalString(data.exchangeLocation, 200)
+        && data.pairingExclusions is list && data.pairingExclusions.size() <= 40
+        && data.gamesConfig is map
+        && isValidNonEmptyString(data.inviteCode, 6, 64)
+        && (!('inviteCodeRevokedAt' in data) || data.inviteCodeRevokedAt == null || data.inviteCodeRevokedAt is timestamp)
+        && data.status in ['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED', 'MATCHED', 'RECIPIENT_REVEAL_OPEN', 'GIFT_EXCHANGE', 'COMPLETED_ARCHIVED']
+        && isValidId(data.createdBy)
+        && isValidId(data.ownerId)
+        && isValidOptionalString(data.ownerDisplayName, 100)
+        && isValidBoundedStringList(data.managerIds, 20, 128)
+        && data.memberCount is int && data.memberCount >= 0 && data.memberCount <= 500
+        && data.invitedCount is int && data.invitedCount >= 0 && data.invitedCount <= 500
+        && data.isMatched is bool
+        && (!('matchedAt' in data) || data.matchedAt == null || data.matchedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGroupManagementGrant(data) {
+      return data.keys().hasAll([
+          'groupId', 'userId', 'userEmail', 'userDisplayName', 'role',
+          'permissions', 'grantedBy', 'grantedAt', 'active'
+        ])
+        && data.keys().hasOnly([
+          'groupId', 'groupName', 'userId', 'userEmail', 'userDisplayName', 'role',
+          'permissions', 'grantedBy', 'grantedAt', 'revokedAt', 'active'
+        ])
+        && isValidId(data.groupId)
+        && (!('groupName' in data) || isValidOptionalString(data.groupName, 120))
+        && isValidId(data.userId)
+        && isValidNonEmptyString(data.userEmail, 5, 160)
+        && isValidNonEmptyString(data.userDisplayName, 1, 100)
+        && data.role in ['OWNER', 'MANAGER']
+        && data.permissions is list
+        && data.permissions.size() <= 12
+        && data.permissions.hasOnly([
+          'GROUP_EDIT', 'INVITE_MANAGE', 'MEMBER_MANAGE', 'SCHEDULE_MANAGE',
+          'MATCH_EXECUTE', 'GAME_MANAGE', 'ANNOUNCEMENT_SEND', 'DELIVERY_MONITOR'
+        ])
+        && isValidNonEmptyString(data.grantedBy, 2, 160)
+        && data.grantedAt is timestamp
+        && (!('revokedAt' in data) || data.revokedAt == null || data.revokedAt is timestamp)
+        && data.active is bool;
+    }
+
+    function isValidGroupMembership(data) {
+      return data.keys().hasAll([
+          'groupId', 'userId', 'participantKey', 'displayName', 'avatarId',
+          'status', 'profileComplete', 'addressComplete', 'deliveryDispatched', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'groupId', 'userId', 'participantKey', 'displayName', 'avatarId',
+          'status', 'profileComplete', 'addressComplete', 'deliveryDispatched',
+          'joinedAt', 'withdrawnAt', 'updatedAt'
+        ])
+        && isValidId(data.groupId)
+        && (data.userId == '' || isValidId(data.userId))
+        && isValidHashId(data.participantKey)
+        && isValidNonEmptyString(data.displayName, 1, 100)
+        && isValidId(data.avatarId)
+        && data.status in ['INVITED', 'JOINED', 'WITHDRAWN', 'REMOVED']
+        && data.profileComplete is bool
+        && data.addressComplete is bool
+        && data.deliveryDispatched is bool
+        && (!('joinedAt' in data) || data.joinedAt == null || data.joinedAt is timestamp)
+        && (!('withdrawnAt' in data) || data.withdrawnAt == null || data.withdrawnAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGroupJoinRequest(data) {
+      return data.keys().hasAll([
+          'groupId', 'userId', 'requesterName', 'requesterEmail', 'note',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'groupId', 'userId', 'requesterName', 'requesterEmail', 'note',
+          'status', 'reviewedBy', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.groupId)
+        && (data.userId == '' || isValidId(data.userId))
+        && isValidNonEmptyString(data.requesterName, 1, 100)
+        && isValidOptionalString(data.requesterEmail, 160)
+        && isValidOptionalString(data.note, 240)
+        && data.status in ['pending', 'approved', 'declined']
+        && (!('reviewedBy' in data) || isValidOptionalString(data.reviewedBy, 160))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGroupAnnouncement(data) {
+      return data.keys().hasAll([
+          'groupId', 'title', 'body', 'kind', 'authorUid', 'authorName', 'authorRole', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'groupId', 'title', 'body', 'kind', 'authorUid', 'authorName', 'authorRole', 'createdAt'
+        ])
+        && isValidId(data.groupId)
+        && isValidNonEmptyString(data.title, 1, 120)
+        && isValidNonEmptyString(data.body, 1, 600)
+        && data.kind in ['announcement', 'reminder']
+        && isValidId(data.authorUid)
+        && isValidNonEmptyString(data.authorName, 1, 100)
+        && data.authorRole in ['ADMIN', 'ORGANISER', 'PARTICIPANT']
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPlatformAuditLog(data) {
+      return data.keys().hasAll([
+          'groupId', 'action', 'actorUid', 'actorEmail', 'actorRole',
+          'targetType', 'targetId', 'targetLabel', 'reason', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'groupId', 'action', 'actorUid', 'actorEmail', 'actorRole',
+          'targetType', 'targetId', 'targetLabel', 'reason', 'createdAt'
+        ])
+        && (data.groupId == '' || isValidId(data.groupId))
+        && isValidNonEmptyString(data.action, 3, 64)
+        && isValidId(data.actorUid)
+        && isValidNonEmptyString(data.actorEmail, 3, 160)
+        && data.actorRole in ['ADMIN', 'ORGANISER', 'PARTICIPANT']
+        && data.targetType in ['user', 'group', 'grant', 'invitation', 'member', 'assignment', 'config']
+        && isValidNonEmptyString(data.targetId, 1, 128)
+        && isValidNonEmptyString(data.targetLabel, 1, 160)
+        && isValidOptionalString(data.reason, 360)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidGroupSlugIndex(data) {
+      return data.keys().hasAll(['groupId', 'slug', 'inviteCodeHash', 'name', 'theme', 'updatedAt'])
+        && data.keys().hasOnly(['groupId', 'slug', 'inviteCodeHash', 'name', 'theme', 'updatedAt'])
+        && isValidId(data.groupId)
+        && isValidNonEmptyString(data.slug, 2, 64)
+        && data.slug.matches('^[a-z0-9\\-]+$')
+        && isValidHashId(data.inviteCodeHash)
+        && isValidNonEmptyString(data.name, 2, 120)
+        && data.theme in ['santa', 'chocolate', 'funny']
+        && data.updatedAt is timestamp;
     }
 
     function isValidEvent(data) {
@@ -564,22 +821,386 @@ service cloud.firestore {
       allow delete: if isValidId(adminId) && isAdmin();
     }
 
-    // Events Collection (Public schedule, budget, and feature flags — no PII)
+    // Global Platform Users Collection (Strict Anti-Privilege-Escalation & PII Isolation)
+    match /users/{userId} {
+      allow get: if isValidId(userId)
+        && isSignedIn()
+        && (
+          request.auth.uid == userId
+          || (request.auth.token.email is string && callerEmailHash() == userId)
+          || isAdmin()
+        );
+      allow list: if isAdmin();
+      allow create: if isValidId(userId)
+        && isValidPlatformUser(incoming())
+        && isSignedIn()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            request.auth.uid == userId
+            && incoming().email.lower() == request.auth.token.email.lower()
+            && incoming().status == 'ACTIVE'
+            && (
+              incoming().role == 'PARTICIPANT'
+              || (
+                incoming().role == 'ORGANISER'
+                && request.auth.token.email is string
+                && exists(/databases/$(database)/documents/users/$(callerEmailHash()))
+                && get(/databases/$(database)/documents/users/$(callerEmailHash())).data.role == 'ORGANISER'
+                && get(/databases/$(database)/documents/users/$(callerEmailHash())).data.status == 'ACTIVE'
+              )
+            )
+          )
+        );
+      allow update: if isValidId(userId)
+        && isValidPlatformUser(incoming())
+        && isSignedIn()
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            request.auth.uid == userId
+            && incoming().email == existing().email
+            && incoming().role == existing().role
+            && incoming().status == existing().status
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(userId)
+        && isSignedIn()
+        && (
+          isAdmin()
+          || (
+            request.auth.token.email is string
+            && callerEmailHash() == userId
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          )
+        );
+    }
+
+    // Admin-Only Platform Configuration
+    match /platformConfig/{configId} {
+      allow get: if isValidId(configId) && configId == 'global';
+      allow list: if isAdmin();
+      allow create, update: if isValidId(configId)
+        && configId == 'global'
+        && isValidPlatformConfig(incoming())
+        && isAdmin()
+        && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // Immutable Platform-Wide Governance Audit Logs (Admin-only read, Admin/Organiser append)
+    match /platformAuditLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(logId)
+        && isValidPlatformAuditLog(incoming())
+        && isSignedIn()
+        && incoming().actorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (isAdmin() || isActiveOrganiser());
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Privacy-Preserving Group Slug Index (resolves /g/{slug}/invite?code=... without listing private groups)
+    match /groupSlugIndex/{slug} {
+      allow get: if isValidId(slug);
+      allow list: if isAdmin();
+      allow create: if isValidId(slug)
+        && isValidGroupSlugIndex(incoming())
+        && incoming().slug == slug
+        && incoming().updatedAt == request.time
+        && isSignedIn()
+        && (isAdmin() || isActiveOrganiser());
+      allow update: if isValidId(slug)
+        && isValidGroupSlugIndex(incoming())
+        && incoming().slug == existing().slug
+        && incoming().groupId == existing().groupId
+        && incoming().updatedAt == request.time
+        && canManageGroup(existing().groupId);
+      allow delete: if isValidId(slug) && isAdmin();
+    }
+
+    // Multi-Group Secret Santa Groups & Scoped Subcollections
+    match /groups/{groupId} {
+      allow get: if isValidId(groupId);
+      allow list: if isAdmin()
+        || existing().visibility == 'discoverable'
+        || (
+          isSignedIn() && (
+            existing().ownerId == request.auth.uid
+            || existing().createdBy == request.auth.uid
+            || request.auth.uid in existing().managerIds
+            || (request.auth.token.email is string && callerEmailHash() in existing().managerIds)
+          )
+        );
+      allow create: if isValidId(groupId)
+        && isValidSantaGroup(incoming())
+        && isSignedIn()
+        && incoming().createdBy == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isActiveOrganiser()
+            && incoming().ownerId == request.auth.uid
+            && incoming().managerIds.size() <= 1
+            && (incoming().managerIds.size() == 0 || incoming().managerIds[0] == request.auth.uid)
+          )
+        );
+      allow update: if isValidId(groupId)
+        && isValidSantaGroup(incoming())
+        && isSignedIn()
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          // Action 1: Authorized Organiser edits group settings / schedule / games / lifecycle / invite code (cannot change ownership, managerIds, or reset matches)
+          || (
+            canManageGroup(groupId)
+            && existing().status != 'COMPLETED_ARCHIVED'
+            && (existing().isMatched == false || incoming().isMatched == true)
+            && (
+              !(existing().status in ['MATCHED', 'RECIPIENT_REVEAL_OPEN', 'GIFT_EXCHANGE'])
+              || !(incoming().status in ['DRAFT', 'REGISTRATION_OPEN', 'REGISTRATION_CLOSED'])
+            )
+            && incoming().ownerId == existing().ownerId
+            && incoming().managerIds == existing().managerIds
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'description', 'theme', 'visibility', 'maxParticipants', 'budget',
+              'timezone', 'registrationDeadline', 'matchingAt', 'recipientRevealAt', 'senderRevealAt',
+              'giftExchangeAt', 'exchangeMode', 'exchangeLocation', 'pairingExclusions', 'gamesConfig',
+              'inviteCode', 'inviteCodeRevokedAt', 'status', 'memberCount', 'invitedCount',
+              'isMatched', 'matchedAt', 'updatedAt'
+            ])
+          )
+        );
+      // Only Admin can permanently delete a group (Organisers archive via status='COMPLETED_ARCHIVED')
+      allow delete: if isValidId(groupId) && isAdmin();
+
+      // Explicit Group Management Grants (OWNER / MANAGER + Granular Permissions)
+      match /managementGrants/{userId} {
+        allow get: if isValidId(groupId)
+          && isValidId(userId)
+          && isSignedIn()
+          && (
+            isAdmin()
+            || request.auth.uid == userId
+            || (request.auth.token.email is string && callerEmailHash() == userId)
+            || canManageGroup(groupId)
+          );
+        allow list: if isValidId(groupId)
+          && (
+            isAdmin()
+            || (isSignedIn() && existing().userId == request.auth.uid)
+            || (isSignedIn() && request.auth.token.email is string && existing().userId == callerEmailHash())
+            || canManageGroup(groupId)
+          );
+        allow create: if isValidId(groupId)
+          && isValidId(userId)
+          && isValidGroupManagementGrant(incoming())
+          && isSignedIn()
+          && incoming().groupId == groupId
+          && incoming().userId == userId
+          && incoming().grantedAt == request.time
+          && existsAfter(/databases/$(database)/documents/groups/$(groupId))
+          && (
+            isAdmin()
+            // Organiser creating their own OWNER grant atomically when creating a group they own
+            || (
+              isActiveOrganiser()
+              && userId == request.auth.uid
+              && incoming().role == 'OWNER'
+              && incoming().active == true
+              && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid
+              && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid
+            )
+          );
+        // Only Admin can update or revoke management grants
+        allow update: if isValidId(groupId)
+          && isValidId(userId)
+          && isValidGroupManagementGrant(incoming())
+          && isAdmin()
+          && incoming().groupId == existing().groupId
+          && incoming().userId == existing().userId
+          && incoming().grantedAt == existing().grantedAt;
+        allow delete: if isValidId(groupId) && isValidId(userId) && isAdmin();
+      }
+
+      // Group Memberships (Separate from Management Grants; zero PII)
+      match /members/{memberId} {
+        allow get: if isValidId(groupId) && isValidId(memberId);
+        allow list: if isValidId(groupId)
+          && (
+            isAdmin()
+            || (isSignedIn() && existing().userId == request.auth.uid)
+            || canManageGroup(groupId)
+          );
+        allow create: if isValidId(groupId)
+          && isValidId(memberId)
+          && isValidGroupMembership(incoming())
+          && incoming().groupId == groupId
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/groups/$(groupId))
+          && (
+            canManageGroup(groupId)
+            || (
+              get(/databases/$(database)/documents/groups/$(groupId)).data.status == 'REGISTRATION_OPEN'
+              && get(/databases/$(database)/documents/groups/$(groupId)).data.isMatched == false
+              && incoming().status == 'JOINED'
+              && incoming().deliveryDispatched == false
+            )
+          );
+        allow update: if isValidId(groupId)
+          && isValidId(memberId)
+          && isValidGroupMembership(incoming())
+          && incoming().groupId == existing().groupId
+          && incoming().participantKey == existing().participantKey
+          && incoming().updatedAt == request.time
+          && (
+            canManageGroup(groupId)
+            // Participant updates own readiness or withdraws strictly before matching
+            || (
+              existing().deliveryDispatched == false
+              && get(/databases/$(database)/documents/groups/$(groupId)).data.isMatched == false
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'displayName', 'avatarId', 'status', 'profileComplete', 'addressComplete', 'withdrawnAt', 'updatedAt'
+              ])
+              && incoming().status in ['JOINED', 'WITHDRAWN']
+            )
+          );
+        allow delete: if isValidId(groupId) && isValidId(memberId) && hasGroupPermission(groupId, 'MEMBER_MANAGE');
+      }
+
+      // Group-Scoped Invitation Mirror (for Organiser management)
+      match /invitations/{tokenHash} {
+        allow get: if isValidId(groupId) && isValidHashId(tokenHash);
+        allow list: if isValidId(groupId) && canManageGroup(groupId);
+        allow create: if isValidId(groupId)
+          && isValidHashId(tokenHash)
+          && isValidInvitation(incoming())
+          && hasGroupPermission(groupId, 'INVITE_MANAGE')
+          && incoming().eventId == groupId
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(groupId)
+          && isValidHashId(tokenHash)
+          && isValidInvitation(incoming())
+          && incoming().eventId == existing().eventId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            hasGroupPermission(groupId, 'INVITE_MANAGE')
+            || (
+              existing().status == 'pending'
+              && existing().expiresAt > request.time
+              && incoming().status == 'claimed'
+              && isValidHashId(incoming().participantKey)
+              && incoming().claimedAt == request.time
+              && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'participantKey', 'claimedAt', 'updatedAt'])
+            )
+          );
+        allow delete: if isValidId(groupId) && isValidHashId(tokenHash) && hasGroupPermission(groupId, 'INVITE_MANAGE');
+      }
+
+      // Discoverable Group Join Requests
+      match /joinRequests/{requestId} {
+        allow get: if isValidId(groupId) && isValidId(requestId)
+          && (canManageGroup(groupId) || (isSignedIn() && existing().userId == request.auth.uid));
+        allow list: if isValidId(groupId)
+          && (canManageGroup(groupId) || (isSignedIn() && existing().userId == request.auth.uid));
+        allow create: if isValidId(groupId)
+          && isValidId(requestId)
+          && isValidGroupJoinRequest(incoming())
+          && incoming().groupId == groupId
+          && incoming().status == 'pending'
+          && !('reviewedBy' in incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/groups/$(groupId))
+          && get(/databases/$(database)/documents/groups/$(groupId)).data.visibility == 'discoverable'
+          && get(/databases/$(database)/documents/groups/$(groupId)).data.status == 'REGISTRATION_OPEN';
+        allow update: if isValidId(groupId)
+          && isValidId(requestId)
+          && isValidGroupJoinRequest(incoming())
+          && hasGroupPermission(groupId, 'MEMBER_MANAGE')
+          && incoming().groupId == existing().groupId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy', 'updatedAt']);
+        allow delete: if isValidId(groupId) && isValidId(requestId) && isAdmin();
+      }
+
+      // Group Announcements & Reminders Board
+      match /announcements/{announcementId} {
+        allow get: if isValidId(groupId) && isValidId(announcementId);
+        allow list: if isValidId(groupId) && existing().groupId == groupId;
+        allow create: if isValidId(groupId)
+          && isValidId(announcementId)
+          && isValidGroupAnnouncement(incoming())
+          && hasGroupPermission(groupId, 'ANNOUNCEMENT_SEND')
+          && incoming().groupId == groupId
+          && incoming().authorUid == request.auth.uid
+          && incoming().createdAt == request.time;
+        allow update: if false;
+        allow delete: if isValidId(groupId) && isValidId(announcementId) && hasGroupPermission(groupId, 'ANNOUNCEMENT_SEND');
+      }
+
+      // Group-Scoped Immutable Activity & Governance Logs
+      match /auditLogs/{logId} {
+        allow get, list: if isValidId(groupId) && canManageGroup(groupId);
+        allow create: if isValidId(groupId)
+          && isValidId(logId)
+          && isValidPlatformAuditLog(incoming())
+          && isSignedIn()
+          && incoming().groupId == groupId
+          && incoming().actorUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && (
+            canManageGroup(groupId)
+            || (
+              isActiveOrganiser()
+              && existsAfter(/databases/$(database)/documents/groups/$(groupId))
+              && getAfter(/databases/$(database)/documents/groups/$(groupId)).data.createdBy == request.auth.uid
+            )
+          );
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+
+    // Events Collection (Public schedule, budget, and feature flags — synced with SantaGroup)
     match /events/{eventId} {
       allow get: if isValidId(eventId);
       allow list: if isAdmin();
       allow create: if isValidId(eventId)
         && isValidEvent(incoming())
-        && isAdmin()
+        && isSignedIn()
         && incoming().createdBy == request.auth.uid
         && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && (isAdmin() || isActiveOrganiser());
       allow update: if isValidId(eventId)
         && isValidEvent(incoming())
-        && isAdmin()
         && incoming().createdBy == existing().createdBy
         && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            canManageGroup(eventId)
+            && (
+              existing().isMatched == false
+              || incoming().isMatched == true
+            )
+          )
+        );
       allow delete: if isValidId(eventId) && isAdmin();
     }
 
@@ -589,7 +1210,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create, update: if isValidId(eventId)
         && isValidEventRoster(incoming())
-        && isAdmin()
+        && hasGroupPermission(eventId, 'MATCH_EXECUTE')
         && incoming().eventId == eventId
         && incoming().updatedAt == request.time;
       allow delete: if isValidId(eventId) && isAdmin();
@@ -601,7 +1222,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidHashId(tokenHash)
         && isValidInvitation(incoming())
-        && isAdmin()
+        && hasGroupPermission(incoming().eventId, 'INVITE_MANAGE')
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
         && exists(/databases/$(database)/documents/events/$(incoming().eventId));
@@ -611,7 +1232,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          isAdmin()
+          hasGroupPermission(existing().eventId, 'INVITE_MANAGE')
           || (
             existing().status == 'pending'
             && existing().expiresAt > request.time
@@ -671,10 +1292,18 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/santaGuesses/$(participantKey)).data.guesses.size() >= 1
           )
         );
-      allow delete: if isValidHashId(participantKey) && isAdmin();
+      allow delete: if isValidHashId(participantKey)
+        && (
+          isAdmin()
+          || (
+            hasGroupPermission(existing().eventId, 'MEMBER_MANAGE')
+            && exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == false
+          )
+        );
     }
 
-    // Time-Locked Giftee Matches (Server clock enforces gifteeRevealAt)
+    // Time-Locked Giftee Matches (Server clock enforces gifteeRevealAt; Organisers can create on match, NEVER read others')
     match /matches/{participantKey} {
       allow get: if isValidHashId(participantKey) && (
         isAdmin()
@@ -686,11 +1315,17 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidHashId(participantKey)
         && isValidMatch(incoming())
-        && isAdmin()
         && incoming().giverKey == participantKey
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || (
+            hasGroupPermission(incoming().eventId, 'MATCH_EXECUTE')
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == false
+          )
+        );
       allow update: if isValidHashId(participantKey)
         && isValidMatch(incoming())
         && isAdmin()
@@ -705,7 +1340,19 @@ service cloud.firestore {
     match /incomingAssignments/{participantKey} {
       allow get: if isValidHashId(participantKey);
       allow list: if isAdmin();
-      allow create, update: if isValidHashId(participantKey)
+      allow create: if isValidHashId(participantKey)
+        && isValidIncomingAssignment(incoming())
+        && incoming().recipientKey == participantKey
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            hasGroupPermission(incoming().eventId, 'MATCH_EXECUTE')
+            && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == false
+          )
+        );
+      allow update: if isValidHashId(participantKey)
         && isValidIncomingAssignment(incoming())
         && isAdmin()
         && incoming().recipientKey == participantKey
@@ -713,7 +1360,7 @@ service cloud.firestore {
       allow delete: if isValidHashId(participantKey) && isAdmin();
     }
 
-    // Time-Locked Secret Santa Identity Reveals (Server clock strictly enforces santaIdentityRevealAt)
+    // Time-Locked Secret Santa Identity Reveals (Server clock strictly enforces santaIdentityRevealAt; Organisers NEVER read)
     match /santaReveals/{participantKey} {
       allow get: if isValidHashId(participantKey) && (
         isAdmin()
@@ -725,11 +1372,17 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidHashId(participantKey)
         && isValidSantaReveal(incoming())
-        && isAdmin()
         && incoming().recipientKey == participantKey
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || (
+            hasGroupPermission(incoming().eventId, 'MATCH_EXECUTE')
+            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == false
+          )
+        );
       allow update: if isValidHashId(participantKey)
         && isValidSantaReveal(incoming())
         && isAdmin()
@@ -740,7 +1393,7 @@ service cloud.firestore {
       allow delete: if isValidHashId(participantKey) && isAdmin();
     }
 
-    // FEATURE 1: Anonymous Santa Mailbox (Keyed by opaque 256-bit assignmentId)
+    // FEATURE 1: Anonymous Santa Mailbox (Keyed by opaque 256-bit assignmentId; Organisers NEVER read)
     match /anonymousConversations/{assignmentId} {
       allow get: if isValidHashId(assignmentId);
       allow list: if isAdmin();
@@ -932,13 +1585,15 @@ service cloud.firestore {
             existing().status != 'received'
             && incoming().adminCorrectionNote == existing().adminCorrectionNote
             && incoming().correctedBy == existing().correctedBy
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'acknowledgedAt', 'problemSummary', 'updatedAt'])
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'acknowledgedAt', 'problemSummary', 'updatedAt'
+            ])
           )
         );
       allow delete: if isValidHashId(assignmentId) && isAdmin();
     }
 
-    // FEATURE 4: Daily Advent Surprises (Server clock prevents early door unlocks)
+    // FEATURE 4: Daily Advent Calendar Unlocks (Server request.time enforces day unlock)
     match /adventUnlocks/{unlockId} {
       allow get: if isValidScopedId(unlockId);
       allow list: if isAdmin();
@@ -946,13 +1601,15 @@ service cloud.firestore {
         && isValidAdventUnlock(incoming())
         && incoming().unlockedAt == request.time
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
-        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.adventEnabled == true
-        && request.time >= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.adventStartAt + duration.value((incoming().day - 1) * 86400, 's');
+        && (
+          !('adventEnabled' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data)
+          || get(/databases/$(database)/documents/events/$(incoming().eventId)).data.adventEnabled == true
+        );
       allow update: if false;
       allow delete: if isValidScopedId(unlockId) && isAdmin();
     }
 
-    // FEATURE 5: Spin Santa's Wheel (Idempotent 1 spin per day — no updates allowed)
+    // FEATURE 5: Spin Santa's Wheel (Idempotent 1 spin per day)
     match /dailyWheelSpins/{spinId} {
       allow get: if isValidScopedId(spinId);
       allow list: if isAdmin();
@@ -968,7 +1625,7 @@ service cloud.firestore {
       allow delete: if isValidScopedId(spinId) && isAdmin();
     }
 
-    // FEATURE 6: Naughty or Nice Meter
+    // FEATURE 6: Naughty or Nice Meter Quiz Results
     match /quizResults/{participantKey} {
       allow get: if isValidHashId(participantKey);
       allow list: if isAdmin();

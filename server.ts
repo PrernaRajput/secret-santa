@@ -9,6 +9,11 @@ import {
   moderateAnonymousMessage,
   pickWeightedWheelPrize,
 } from './src/utils/workshopLogic.ts';
+import {
+  canTransitionGroupLifecycle,
+  generateConstrainedDerangement,
+} from './src/utils/rbacLogic.ts';
+import type { GroupLifecycleStatus, PlatformRole } from './src/types/rbac.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +59,46 @@ const recoveryRequestSchema = z.object({
   eventId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/),
   requestedName: z.string().trim().min(1).max(100),
   verificationHint: z.string().trim().max(240).optional().default(''),
+});
+
+const lifecycleEnum = z.enum([
+  'DRAFT',
+  'REGISTRATION_OPEN',
+  'REGISTRATION_CLOSED',
+  'MATCHED',
+  'RECIPIENT_REVEAL_OPEN',
+  'GIFT_EXCHANGE',
+  'COMPLETED_ARCHIVED',
+]);
+
+const checkTransitionSchema = z.object({
+  current: lifecycleEnum,
+  next: lifecycleEnum,
+  actorRole: z.enum(['ADMIN', 'ORGANISER', 'PARTICIPANT']),
+  joinedParticipantCount: z.number().int().min(0).max(500).optional(),
+  isMatched: z.boolean().optional(),
+});
+
+const validateExclusionsSchema = z.object({
+  participants: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(128),
+        name: z.string().min(1).max(100),
+      })
+    )
+    .min(2)
+    .max(200),
+  exclusions: z
+    .array(
+      z.object({
+        id: z.string().max(64),
+        memberA: z.string().min(1).max(100),
+        memberB: z.string().min(1).max(100),
+        reason: z.string().max(120).optional(),
+      })
+    )
+    .max(40),
 });
 
 export function createApiRouter() {
@@ -186,6 +231,50 @@ export function createApiRouter() {
       message:
         'Your request has been logged for the event organizer. Once they verify your identity, they will send you a fresh one-time recovery link!',
     });
+  });
+
+  // Server-side RBAC group lifecycle transition policy check
+  router.post('/rbac/check-transition', (req, res) => {
+    const ip = getClientIp(req);
+    if (isRateLimited(`rbac-transition:${ip}`, 30, 60_000)) {
+      res.status(429).json({ ok: false, reason: 'Too many policy checks. Please wait a moment.' });
+      return;
+    }
+    const parsed = checkTransitionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, reason: 'Invalid group lifecycle transition payload.' });
+      return;
+    }
+    const check = canTransitionGroupLifecycle(
+      parsed.data.current as GroupLifecycleStatus,
+      parsed.data.next as GroupLifecycleStatus,
+      parsed.data.actorRole as PlatformRole,
+      {
+        joinedParticipantCount: parsed.data.joinedParticipantCount,
+        isMatched: parsed.data.isMatched,
+      }
+    );
+    res.json(check);
+  });
+
+  // Server-side pairing exclusion feasibility verification (never returns actual assignments!)
+  router.post('/rbac/validate-exclusions', (req, res) => {
+    const ip = getClientIp(req);
+    if (isRateLimited(`rbac-exclusions:${ip}`, 20, 60_000)) {
+      res.status(429).json({ ok: false, error: 'Too many exclusion checks. Please wait a moment.' });
+      return;
+    }
+    const parsed = validateExclusionsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: 'Invalid exclusion check payload.' });
+      return;
+    }
+    const testRun = generateConstrainedDerangement(parsed.data.participants, parsed.data.exclusions);
+    if (!testRun.ok) {
+      res.status(422).json({ ok: false, error: testRun.error });
+      return;
+    }
+    res.json({ ok: true, feasible: true, participantCount: parsed.data.participants.length });
   });
 
   return router;

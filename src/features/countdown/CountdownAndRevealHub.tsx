@@ -11,6 +11,7 @@ import {
   Sparkles,
   Gift,
   Eye,
+  Megaphone,
   Truck,
   Wallet,
 } from 'lucide-react';
@@ -50,6 +51,8 @@ import {
 } from '../../utils/workshopLogic';
 import { GoldenSecretEnvelope } from '../../components/secret/GoldenSecretEnvelope';
 import { SantasWorkshopHub } from '../workshop/SantasWorkshopHub';
+import { GroupAnnouncement } from '../../types/rbac';
+import { listGroupAnnouncements } from '../../services/rbacService';
 
 interface CountdownAndRevealHubProps {
   theme: ThemeId;
@@ -252,6 +255,21 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
   const [outgoingDelivery, setOutgoingDelivery] = useState<DeliveryProgressRecord | null>(null);
   const [deliverySyncError, setDeliverySyncError] = useState<string | null>(null);
   const [deliveryRetryTick, setDeliveryRetryTick] = useState(0);
+  const [groupAnnouncements, setGroupAnnouncements] = useState<GroupAnnouncement[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    listGroupAnnouncements(event.id)
+      .then((list) => {
+        if (active) setGroupAnnouncements(list.slice(0, 2));
+      })
+      .catch(() => {
+        if (active) setGroupAnnouncements([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [event.id]);
 
   const gifteeRevealMs = event.gifteeRevealAt.getTime();
   const santaRevealMs = event.santaIdentityRevealAt.getTime();
@@ -752,6 +770,33 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
               Set my dislikes →
             </button>
           </div>
+
+          {/* Group Announcements & Reminders from Head Elf Organiser */}
+          {groupAnnouncements.length > 0 && (
+            <div className="space-y-2">
+              {groupAnnouncements.map((ann) => (
+                <div
+                  key={ann.id}
+                  className={`rounded-2xl border px-4 py-3 flex items-start gap-2.5 ${
+                    theme === 'chocolate'
+                      ? 'bg-[#fff9ef] border-[#d9b38c]'
+                      : 'bg-white/90 border-rose-200'
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <Megaphone className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-display font-bold text-sm text-slate-900">
+                      {ann.kind === 'reminder' ? 'Reminder: ' : ''}
+                      {ann.title}
+                    </p>
+                    <p className="text-xs text-slate-600 leading-relaxed mt-0.5">{ann.body}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* STAGE 2: GIFTEE SCRATCH & SHAKE REVEAL */}
           {showingGifteeReveal ? (

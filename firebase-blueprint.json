@@ -437,10 +437,211 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["eventId", "action", "actorEmail", "targetLabel", "note", "createdAt"]
+    },
+    "PlatformUser": {
+      "title": "PlatformUser",
+      "description": "Global platform user record storing verified account identity, platform role (ADMIN, ORGANISER, PARTICIPANT), and active/suspended status.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 160 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 400 },
+        "role": { "type": "string", "enum": ["ADMIN", "ORGANISER", "PARTICIPANT"] },
+        "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role", "status", "createdAt", "updatedAt"]
+    },
+    "PlatformConfig": {
+      "title": "PlatformConfig",
+      "description": "Admin-only global platform limits, permitted budget range, default timezone, and global game feature switches.",
+      "type": "object",
+      "properties": {
+        "maxGroupsPerOrganiser": { "type": "integer" },
+        "defaultMaxParticipants": { "type": "integer" },
+        "permittedBudgetMin": { "type": "integer" },
+        "permittedBudgetMax": { "type": "integer" },
+        "defaultTimezone": { "type": "string", "maxLength": 64 },
+        "defaultCurrency": { "type": "string", "enum": ["INR", "USD", "GBP"] },
+        "allowDiscoverableGroups": { "type": "boolean" },
+        "globalGamesEnabled": { "type": "object" },
+        "updatedBy": { "type": "string", "maxLength": 160 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "maxGroupsPerOrganiser", "defaultMaxParticipants", "permittedBudgetMin", "permittedBudgetMax",
+        "defaultTimezone", "defaultCurrency", "allowDiscoverableGroups", "globalGamesEnabled", "updatedBy", "updatedAt"
+      ]
+    },
+    "SantaGroup": {
+      "title": "SantaGroup",
+      "description": "Secret Santa group with lifecycle state machine, theme, visibility, budget, deadlines, exchange mode, pairing exclusions, and games config.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-z0-9\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 400 },
+        "theme": { "type": "string", "enum": ["santa", "chocolate", "funny"] },
+        "visibility": { "type": "string", "enum": ["private", "discoverable"] },
+        "maxParticipants": { "type": "integer" },
+        "budget": { "type": "object" },
+        "timezone": { "type": "string", "maxLength": 64 },
+        "registrationDeadline": { "type": "string", "format": "date-time" },
+        "matchingAt": { "type": "string", "format": "date-time" },
+        "recipientRevealAt": { "type": "string", "format": "date-time" },
+        "senderRevealAt": { "type": "string", "format": "date-time" },
+        "giftExchangeAt": { "type": "string", "format": "date-time" },
+        "exchangeMode": { "type": "string", "enum": ["delivery", "in-person", "hybrid"] },
+        "exchangeLocation": { "type": "string", "maxLength": 200 },
+        "pairingExclusions": { "type": "array" },
+        "gamesConfig": { "type": "object" },
+        "inviteCode": { "type": "string", "minLength": 6, "maxLength": 64 },
+        "inviteCodeRevokedAt": { "type": "string", "format": "date-time" },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "REGISTRATION_OPEN", "REGISTRATION_CLOSED", "MATCHED", "RECIPIENT_REVEAL_OPEN", "GIFT_EXCHANGE", "COMPLETED_ARCHIVED"]
+        },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "ownerDisplayName": { "type": "string", "maxLength": 100 },
+        "managerIds": { "type": "array" },
+        "memberCount": { "type": "integer" },
+        "invitedCount": { "type": "integer" },
+        "isMatched": { "type": "boolean" },
+        "matchedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "slug", "name", "description", "theme", "visibility", "maxParticipants", "budget",
+        "timezone", "registrationDeadline", "matchingAt", "recipientRevealAt", "giftExchangeAt",
+        "exchangeMode", "exchangeLocation", "pairingExclusions", "gamesConfig", "inviteCode",
+        "status", "createdBy", "ownerId", "ownerDisplayName", "managerIds", "memberCount",
+        "invitedCount", "isMatched", "createdAt", "updatedAt"
+      ]
+    },
+    "GroupManagementGrant": {
+      "title": "GroupManagementGrant",
+      "description": "Explicit group-scoped management grant (OWNER or MANAGER) with granular permission flags.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "groupName": { "type": "string", "maxLength": 120 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 160 },
+        "userDisplayName": { "type": "string", "maxLength": 100 },
+        "role": { "type": "string", "enum": ["OWNER", "MANAGER"] },
+        "permissions": { "type": "array" },
+        "grantedBy": { "type": "string", "maxLength": 160 },
+        "grantedAt": { "type": "string", "format": "date-time" },
+        "revokedAt": { "type": "string", "format": "date-time" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["groupId", "userId", "userEmail", "userDisplayName", "role", "permissions", "grantedBy", "grantedAt", "active"]
+    },
+    "GroupMembership": {
+      "title": "GroupMembership",
+      "description": "Non-sensitive group membership record separating ordinary participant membership from management grants.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "participantKey": { "type": "string", "maxLength": 64 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "avatarId": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["INVITED", "JOINED", "WITHDRAWN", "REMOVED"] },
+        "profileComplete": { "type": "boolean" },
+        "addressComplete": { "type": "boolean" },
+        "deliveryDispatched": { "type": "boolean" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "withdrawnAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "groupId", "userId", "participantKey", "displayName", "avatarId",
+        "status", "profileComplete", "addressComplete", "deliveryDispatched", "updatedAt"
+      ]
+    },
+    "GroupJoinRequest": {
+      "title": "GroupJoinRequest",
+      "description": "Join request submitted by a participant for a discoverable Secret Santa group awaiting Organiser/Admin approval.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "requesterName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "requesterEmail": { "type": "string", "maxLength": 160 },
+        "note": { "type": "string", "maxLength": 240 },
+        "status": { "type": "string", "enum": ["pending", "approved", "declined"] },
+        "reviewedBy": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "userId", "requesterName", "requesterEmail", "note", "status", "createdAt", "updatedAt"]
+    },
+    "GroupAnnouncement": {
+      "title": "GroupAnnouncement",
+      "description": "Organiser or Admin announcement or reminder broadcast to a group.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "kind": { "type": "string", "enum": ["announcement", "reminder"] },
+        "authorUid": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorRole": { "type": "string", "enum": ["ADMIN", "ORGANISER", "PARTICIPANT"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "title", "body", "kind", "authorUid", "authorName", "authorRole", "createdAt"]
+    },
+    "PlatformAuditLog": {
+      "title": "PlatformAuditLog",
+      "description": "Immutable governance and security audit trail recording actor, target, timestamp, and reason.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "action": { "type": "string", "maxLength": 64 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 160 },
+        "actorRole": { "type": "string", "enum": ["ADMIN", "ORGANISER", "PARTICIPANT"] },
+        "targetType": { "type": "string", "enum": ["user", "group", "grant", "invitation", "member", "assignment", "config"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "targetLabel": { "type": "string", "maxLength": 160 },
+        "reason": { "type": "string", "maxLength": 360 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "action", "actorUid", "actorEmail", "actorRole", "targetType", "targetId", "targetLabel", "reason", "createdAt"]
+    },
+    "GroupSlugIndex": {
+      "title": "GroupSlugIndex",
+      "description": "Privacy-preserving slug-to-groupId index holding only the SHA-256 hash of the group invite code so private groups can resolve /g/{slug}/invite?code=... links without exposing group lists.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "slug": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-z0-9\\-]+$" },
+        "inviteCodeHash": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 120 },
+        "theme": { "type": "string", "enum": ["santa", "chocolate", "funny"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "slug", "inviteCodeHash", "name", "theme", "updatedAt"]
     }
   },
   "firestore": {
     "/admins/{uid}": { "schema": { "$ref": "#/entities/AdminUser" }, "description": "Authorized admin accounts verified against Firebase Auth." },
+    "/users/{userId}": { "schema": { "$ref": "#/entities/PlatformUser" }, "description": "Global platform user profiles with role (ADMIN, ORGANISER, PARTICIPANT) and status." },
+    "/platformConfig/{configId}": { "schema": { "$ref": "#/entities/PlatformConfig" }, "description": "Admin-managed platform-wide settings and feature switches." },
+    "/platformAuditLogs/{logId}": { "schema": { "$ref": "#/entities/PlatformAuditLog" }, "description": "Immutable platform-wide governance, role change, and break-glass audit logs." },
+    "/groupSlugIndex/{slug}": { "schema": { "$ref": "#/entities/GroupSlugIndex" }, "description": "Slug lookup index for /g/{slug}/invite?code=... links." },
+    "/groups/{groupId}": { "schema": { "$ref": "#/entities/SantaGroup" }, "description": "Secret Santa groups with lifecycle state machine and configuration." },
+    "/groups/{groupId}/managementGrants/{userId}": { "schema": { "$ref": "#/entities/GroupManagementGrant" }, "description": "Group-scoped Owner/Manager grants with granular permissions." },
+    "/groups/{groupId}/members/{memberId}": { "schema": { "$ref": "#/entities/GroupMembership" }, "description": "Group participant memberships separated from management access." },
+    "/groups/{groupId}/invitations/{tokenHash}": { "schema": { "$ref": "#/entities/Invitation" }, "description": "Group-scoped mirror of personal invitation tokens for Organiser management." },
+    "/groups/{groupId}/joinRequests/{requestId}": { "schema": { "$ref": "#/entities/GroupJoinRequest" }, "description": "Pending and reviewed join requests for discoverable groups." },
+    "/groups/{groupId}/announcements/{announcementId}": { "schema": { "$ref": "#/entities/GroupAnnouncement" }, "description": "Group announcement board posts and participant reminders." },
+    "/groups/{groupId}/auditLogs/{logId}": { "schema": { "$ref": "#/entities/PlatformAuditLog" }, "description": "Immutable group-scoped activity and governance logs." },
     "/events/{eventId}": { "schema": { "$ref": "#/entities/SecretSantaEvent" }, "description": "Secret Santa event schedule, budget, and Workshop feature configuration." },
     "/invitations/{tokenHash}": { "schema": { "$ref": "#/entities/Invitation" }, "description": "One-time invitation & short-lived recovery records keyed by SHA-256 hash." },
     "/participants/{participantKey}": { "schema": { "$ref": "#/entities/Participant" }, "description": "Participant profile documents keyed by 256-bit capability hashes." },

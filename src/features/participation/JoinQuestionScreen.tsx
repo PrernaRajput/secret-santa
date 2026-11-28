@@ -190,20 +190,16 @@ export const JoinQuestionScreen: React.FC<JoinQuestionScreenProps> = ({
             </AnimatePresence>
           </div>
 
-          {/* Dedicated Runaway NO Playground Arena (never overlaps YES or overflows screen) */}
+          {/* Dedicated Runaway NO Playground Arena (seamless with card background, never overlaps YES) */}
           <div
             ref={arenaRef}
             onPointerMove={handleArenaPointerMove}
-            className={`relative w-full h-44 sm:h-48 rounded-2xl border-2 border-dashed overflow-hidden touch-none select-none ${
-              theme === 'chocolate'
-                ? 'bg-[#f6e4c8]/70 border-[#cfa375]'
-                : theme === 'funny'
-                  ? 'bg-amber-50/80 border-pink-400'
-                  : 'bg-indigo-50/70 border-indigo-200'
-            }`}
+            className="relative w-full h-44 sm:h-48 bg-transparent border-0 overflow-hidden touch-none select-none"
           >
-            {/* Subtle dotted escape trail decoration */}
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-25 text-xs font-display font-semibold tracking-wider text-slate-600">
+            {/* Subtle centered hint */}
+            <div
+              className={`pointer-events-none absolute inset-0 flex items-center justify-center opacity-30 text-xs font-display font-semibold tracking-wider ${cfg.mutedText}`}
+            >
               {dodgeCount >= 3
                 ? `No button dodges: ${dodgeCount} 💨`
                 : theme === 'funny'
@@ -219,6 +215,8 @@ export const JoinQuestionScreen: React.FC<JoinQuestionScreenProps> = ({
               animate={{
                 left: `${noPos.x}%`,
                 top: `${noPos.y}%`,
+                x: '-50%',
+                y: '-50%',
                 rotate: dodgeCount % 2 === 0 ? -4 : 4,
               }}
               transition={{ type: 'spring', stiffness: 520, damping: 24 }}
@@ -235,11 +233,7 @@ export const JoinQuestionScreen: React.FC<JoinQuestionScreenProps> = ({
                 e.preventDefault();
                 dodgeAwayFrom();
               }}
-              style={{
-                position: 'absolute',
-                transform: 'translate(-50%, -50%)',
-              }}
-              className="min-h-[46px] px-6 py-2.5 rounded-full bg-gradient-to-b from-rose-400 to-rose-600 text-white font-display font-bold text-base shadow-[0_5px_0_#9f1239,0_8px_16px_rgba(159,18,57,0.3)] border border-rose-300/60 cursor-not-allowed whitespace-nowrap select-none"
+              className="absolute min-h-[46px] px-6 py-2.5 rounded-full bg-gradient-to-b from-rose-400 to-rose-600 text-white font-display font-bold text-base shadow-[0_5px_0_#9f1239,0_8px_16px_rgba(159,18,57,0.3)] border border-rose-300/60 cursor-not-allowed whitespace-nowrap select-none"
             >
               No! 🏃‍♂️
             </motion.button>

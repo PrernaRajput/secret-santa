@@ -44,6 +44,7 @@ import {
   sha256Hex,
 } from '../utils/crypto';
 import { extractShareableDislikes } from '../utils/workshopLogic';
+import { buildPersonalInviteUrl } from '../utils/rbacLogic';
 
 function toDateSafe(val: unknown, fallback: Date): Date {
   if (val instanceof Timestamp) return val.toDate();
@@ -338,11 +339,10 @@ export async function generatePersonalInvitation(
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    const baseUrl = window.location.origin + window.location.pathname;
     return {
       rawToken,
       tokenHash,
-      inviteUrl: `${baseUrl}?token=${rawToken}`,
+      inviteUrl: buildPersonalInviteUrl(window.location.origin, rawToken),
     };
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
@@ -413,11 +413,10 @@ export async function issueRecoveryInvitation(params: {
     });
 
     await batch.commit();
-    const baseUrl = window.location.origin + window.location.pathname;
     return {
       rawToken,
       tokenHash,
-      inviteUrl: `${baseUrl}?token=${rawToken}`,
+      inviteUrl: buildPersonalInviteUrl(window.location.origin, rawToken),
       expiresAt,
     };
   } catch (err) {
