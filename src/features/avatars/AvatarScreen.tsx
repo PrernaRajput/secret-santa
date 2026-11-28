@@ -12,6 +12,7 @@ interface AvatarScreenProps {
   theme: ThemeId;
   selectedAvatarId: string;
   genderFilter: GenderCategory;
+  hasGoldenCrown?: boolean;
   onSelectAvatar: (avatarId: string) => void;
   onChangeGenderFilter: (filter: GenderCategory) => void;
   onContinue: () => void;
@@ -28,6 +29,7 @@ export const AvatarScreen: React.FC<AvatarScreenProps> = ({
   theme,
   selectedAvatarId,
   genderFilter,
+  hasGoldenCrown = false,
   onSelectAvatar,
   onChangeGenderFilter,
   onContinue,
@@ -125,7 +127,12 @@ export const AvatarScreen: React.FC<AvatarScreenProps> = ({
           {/* Selected Preview & Continue CTA */}
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-black/10">
             <div className="flex items-center gap-3">
-              <AvatarGraphic avatarId={activeAvatar.id} size={48} className="w-12 h-12 shrink-0" />
+              <AvatarGraphic
+                avatarId={activeAvatar.id}
+                size={48}
+                hasGoldenCrown={hasGoldenCrown}
+                className="w-12 h-12 shrink-0"
+              />
               <div className="text-left">
                 <p className={`text-xs font-medium ${cfg.mutedText}`}>Selected Character</p>
                 <p className={`font-display font-bold text-base ${cfg.cardText}`}>

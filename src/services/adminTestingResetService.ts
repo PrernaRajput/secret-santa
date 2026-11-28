@@ -100,8 +100,8 @@ export const ADMIN_RESET_TARGETS: AdminResetTargetMeta[] = [
     category: 'workshop-features',
     label: 'Guess Your Santa',
     emoji: '🕵️',
-    description: 'Clears submitted detective guesses so guesses reset to full.',
-    sandboxPrefixes: ['guesses_'],
+    description: 'Clears submitted detective guesses, golden envelope state & Golden Detective Crown.',
+    sandboxPrefixes: ['guesses_', 'golden_crown_'],
   },
   {
     id: 'dislikes',
@@ -322,11 +322,30 @@ export async function adminResetFeatureTargets(params: {
               ))
             );
             break;
-          case 'guesses':
+          case 'guesses': {
             refsToDelete.push(
               ...(await collectParticipantCollectionRefs('santaGuesses', eventId, participantKey))
             );
+            // Also clear the rare Golden Detective Crown cosmetic when resetting guesses during testing
+            const partSnap = await getDocs(
+              query(collection(db, 'participants'), where('eventId', '==', eventId))
+            );
+            const targetParts = participantKey
+              ? partSnap.docs.filter((d) => d.id === participantKey)
+              : partSnap.docs;
+            const crownedParts = targetParts.filter((d) => Boolean(d.data().hasGoldenDetectiveCrown));
+            if (crownedParts.length > 0) {
+              const crownBatch = writeBatch(db);
+              crownedParts.forEach((d) => {
+                crownBatch.update(d.ref, {
+                  hasGoldenDetectiveCrown: false,
+                  updatedAt: serverTimestamp(),
+                });
+              });
+              await crownBatch.commit();
+            }
             break;
+          }
           case 'dislikes':
             refsToDelete.push(
               ...(await collectParticipantCollectionRefs(

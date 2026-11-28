@@ -197,7 +197,11 @@ export const NaughtyOrNiceView: React.FC<NaughtyOrNiceViewProps> = ({
       {scanning ? (
         <div className="rounded-3xl bg-slate-950 text-white p-8 text-center space-y-5 relative overflow-hidden">
           <div className="relative w-32 h-32 mx-auto rounded-3xl bg-white/10 p-2 overflow-hidden border-2 border-emerald-400/70">
-            <AvatarGraphic avatarId={participant.avatarId} size={112} />
+            <AvatarGraphic
+              avatarId={participant.avatarId}
+              size={112}
+              hasGoldenCrown={Boolean(participant.hasGoldenDetectiveCrown)}
+            />
             {/* Animated Laser Scanner Bar */}
             <motion.div
               animate={{ top: ['0%', '92%', '0%'] }}

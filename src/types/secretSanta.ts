@@ -33,6 +33,7 @@ export interface ParticipantProfile {
   genderPreference: GenderCategory;
   selectedTheme: ThemeId;
   hasJoined: boolean;
+  hasGoldenDetectiveCrown?: boolean;
   createdAt?: Date | null;
   updatedAt?: Date | null;
 }
@@ -241,6 +242,7 @@ export interface SantaGuessRecord {
   eventId: string;
   participantKey: string;
   guesses: SantaGuessItem[];
+  goldenEnvelopeOpened?: boolean;
   updatedAt: Date;
 }
 

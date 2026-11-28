@@ -2,7 +2,6 @@ import {
   collection,
   doc,
   getDoc,
-  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
@@ -12,6 +11,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
+import { claimGoldenDetectiveCrown } from './secretSantaService';
 import {
   AdventUnlockRecord,
   AnonymousConversationMeta,
@@ -525,15 +525,64 @@ export async function fetchMySantaGuesses(
     const snap = await getDoc(doc(db, 'santaGuesses', participantKey));
     if (!snap.exists()) return null;
     const d = snap.data();
-    return {
-      eventId: String(d.eventId || eventId),
-      participantKey,
-      guesses: Array.isArray(d.guesses) ? (d.guesses as SantaGuessItem[]) : [],
-      updatedAt: toDateSafe(d.updatedAt),
-    };
-  } catch {
-    return null;
+      return {
+        eventId: String(d.eventId || eventId),
+        participantKey,
+        guesses: Array.isArray(d.guesses) ? (d.guesses as SantaGuessItem[]) : [],
+        goldenEnvelopeOpened: Boolean(d.goldenEnvelopeOpened),
+        updatedAt: toDateSafe(d.updatedAt),
+      };
+    } catch {
+      return null;
+    }
   }
+
+export function readSandboxGoldenCrown(eventId: string, participantKey: string): boolean {
+  return sandboxRead<boolean>(`golden_crown_${eventId}_${participantKey}`, false);
+}
+
+export function writeSandboxGoldenCrown(
+  eventId: string,
+  participantKey: string,
+  unlocked: boolean
+): void {
+  sandboxWrite(`golden_crown_${eventId}_${participantKey}`, unlocked);
+}
+
+/**
+ * Unseals The 1% Santa Secret golden envelope and permanently grants
+ * the rare Golden Detective Crown avatar cosmetic for this event.
+ */
+export async function openGoldenSecretEnvelope(params: {
+  participantKey: string;
+  eventId: string;
+  liveMode: boolean;
+}): Promise<void> {
+  const { participantKey, eventId, liveMode } = params;
+  writeSandboxGoldenCrown(eventId, participantKey, true);
+
+  if (!liveMode) {
+    const existing = sandboxRead<SantaGuessRecord | null>(`guesses_${participantKey}`, null);
+    if (existing) {
+      sandboxWrite(`guesses_${participantKey}`, {
+        ...existing,
+        goldenEnvelopeOpened: true,
+        updatedAt: new Date(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, 'santaGuesses', participantKey), {
+      goldenEnvelopeOpened: true,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `santaGuesses/${participantKey}`);
+  }
+
+  await claimGoldenDetectiveCrown(participantKey);
 }
 
 export async function submitSantaGuess(params: {

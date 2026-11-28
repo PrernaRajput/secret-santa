@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import {
+  ParticipantProfile,
   PublicRosterEntry,
   SantaGuessItem,
   SantaIdentityReveal,
@@ -18,36 +19,47 @@ import {
 } from '../../types/secretSanta';
 import { THEME_CONFIGS } from '../../components/themes/ThemeConfig';
 import { AvatarGraphic } from '../../components/avatars/AvatarGraphic';
+import { GoldenSecretEnvelope } from '../../components/secret/GoldenSecretEnvelope';
 import {
   fetchMySantaGuesses,
   submitSantaGuess,
 } from '../../services/workshopService';
-import { isSenderIdentityRevealAuthorized } from '../../utils/workshopLogic';
+import {
+  hasCorrectSantaGuess,
+  isSenderIdentityRevealAuthorized,
+} from '../../utils/workshopLogic';
 import { playChimeSound, playPopSound } from '../../utils/sound';
 
 interface GuessYourSantaViewProps {
   theme: ThemeId;
   event: SecretSantaEvent;
+  participant: ParticipantProfile;
   participantKey: string;
   selfPublicId: string;
   roster: PublicRosterEntry[];
   santaReveal: SantaIdentityReveal | null;
   serverNow: Date;
   liveMode: boolean;
+  onOpenGoldenEnvelope?: () => Promise<void> | void;
 }
 
 export const GuessYourSantaView: React.FC<GuessYourSantaViewProps> = ({
   theme,
   event,
+  participant,
   participantKey,
   selfPublicId,
   roster,
   santaReveal,
   serverNow,
   liveMode,
+  onOpenGoldenEnvelope,
 }) => {
   const cfg = THEME_CONFIGS[theme];
   const [guesses, setGuesses] = useState<SantaGuessItem[]>([]);
+  const [goldenEnvelopeOpened, setGoldenEnvelopeOpened] = useState(
+    Boolean(participant.hasGoldenDetectiveCrown)
+  );
   const [selectedId, setSelectedId] = useState<string>('');
   const [latestReaction, setLatestReaction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,19 +67,30 @@ export const GuessYourSantaView: React.FC<GuessYourSantaViewProps> = ({
 
   const maxGuesses = Math.max(1, Math.min(10, event.maxGuesses || 3));
   const eligibleSuspects = roster.filter((entry) => entry.publicId !== selfPublicId);
-  const revealAuthorized = isSenderIdentityRevealAuthorized(event, serverNow) && Boolean(santaReveal);
+  const revealAuthorized =
+    Boolean(santaReveal) &&
+    (!liveMode || isSenderIdentityRevealAuthorized(event, serverNow));
 
   useEffect(() => {
     let active = true;
     fetchMySantaGuesses(participantKey, event.id, liveMode).then((rec) => {
       if (active && rec) {
         setGuesses(rec.guesses);
+        if (rec.goldenEnvelopeOpened) {
+          setGoldenEnvelopeOpened(true);
+        }
       }
     });
     return () => {
       active = false;
     };
   }, [participantKey, event.id, liveMode]);
+
+  useEffect(() => {
+    if (participant.hasGoldenDetectiveCrown) {
+      setGoldenEnvelopeOpened(true);
+    }
+  }, [participant.hasGoldenDetectiveCrown]);
 
   const handleLockGuess = async () => {
     const candidate = eligibleSuspects.find((s) => s.publicId === selectedId);
@@ -98,13 +121,12 @@ export const GuessYourSantaView: React.FC<GuessYourSantaViewProps> = ({
   };
 
   const guessedCorrectlyAfterReveal =
-    revealAuthorized &&
-    santaReveal &&
-    guesses.some(
-      (g) =>
-        (santaReveal.santaPublicId && g.guessedPublicId === santaReveal.santaPublicId) ||
-        g.guessedName.toLowerCase() === santaReveal.santaName.toLowerCase()
-    );
+    revealAuthorized && hasCorrectSantaGuess(guesses, santaReveal);
+
+  const handleOpenGoldenEnvelope = () => {
+    setGoldenEnvelopeOpened(true);
+    void onOpenGoldenEnvelope?.();
+  };
 
   const guessesLeft = Math.max(0, maxGuesses - guesses.length);
 
@@ -168,6 +190,16 @@ export const GuessYourSantaView: React.FC<GuessYourSantaViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* The 1% Santa Secret — Mysterious Golden Envelope when guessed correctly! */}
+      {guessedCorrectlyAfterReveal && (
+        <GoldenSecretEnvelope
+          participantName={participant.name}
+          participantAvatarId={participant.avatarId}
+          alreadyOpened={goldenEnvelopeOpened || Boolean(participant.hasGoldenDetectiveCrown)}
+          onOpenEnvelope={handleOpenGoldenEnvelope}
+        />
+      )}
 
       {/* Post-Reveal Official Detective Verdict (ONLY after santaIdentityRevealAt!) */}
       {revealAuthorized && santaReveal && (

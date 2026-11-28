@@ -1321,10 +1321,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className="rounded-2xl border border-slate-200 p-3.5 flex items-center justify-between gap-3"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <AvatarGraphic avatarId={p.avatarId} size={44} className="shrink-0" />
+                          <AvatarGraphic
+                            avatarId={p.avatarId}
+                            size={44}
+                            hasGoldenCrown={Boolean(p.hasGoldenDetectiveCrown)}
+                            className="shrink-0"
+                          />
                           <div className="min-w-0">
                             <p className="font-semibold text-sm text-slate-900 truncate">
                               {p.name}
+                              {p.hasGoldenDetectiveCrown ? (
+                                <span className="ml-2 text-xs font-semibold text-amber-700">
+                                  · Golden Detective Crown
+                                </span>
+                              ) : null}
                             </p>
                             <p className="text-xs text-slate-500 truncate">
                               {p.address.city}, {p.address.postalCode} · {p.hobbies.join(', ')}

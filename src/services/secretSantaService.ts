@@ -634,11 +634,28 @@ export async function fetchParticipantProfile(
       genderPreference: (d.genderPreference as GenderCategory) || 'all',
       selectedTheme: (d.selectedTheme as ThemeId) || 'santa',
       hasJoined: Boolean(d.hasJoined),
+      hasGoldenDetectiveCrown: Boolean(d.hasGoldenDetectiveCrown),
       createdAt: d.createdAt ? toDateSafe(d.createdAt, new Date()) : null,
       updatedAt: d.updatedAt ? toDateSafe(d.updatedAt, new Date()) : null,
     };
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, path);
+  }
+}
+
+/**
+ * Permanently equips the rare Golden Detective Crown cosmetic for this participant
+ * in the current event after unlocking The 1% Santa Secret.
+ */
+export async function claimGoldenDetectiveCrown(participantKey: string): Promise<void> {
+  const path = `participants/${participantKey}`;
+  try {
+    await updateDoc(doc(db, 'participants', participantKey), {
+      hasGoldenDetectiveCrown: true,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
   }
 }
 
@@ -668,6 +685,7 @@ export async function listParticipants(eventId = DEFAULT_EVENT_ID): Promise<Part
         genderPreference: (d.genderPreference as GenderCategory) || 'all',
         selectedTheme: (d.selectedTheme as ThemeId) || 'santa',
         hasJoined: Boolean(d.hasJoined),
+        hasGoldenDetectiveCrown: Boolean(d.hasGoldenDetectiveCrown),
         createdAt: d.createdAt ? toDateSafe(d.createdAt, new Date()) : null,
         updatedAt: d.updatedAt ? toDateSafe(d.updatedAt, new Date()) : null,
       };

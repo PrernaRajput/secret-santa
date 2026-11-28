@@ -191,7 +191,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'eventId', 'invitationHash', 'name', 'address', 'hobbies',
           'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined',
-          'createdAt', 'updatedAt'
+          'hasGoldenDetectiveCrown', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.eventId)
         && (data.invitationHash == '' || isValidHashId(data.invitationHash))
@@ -202,6 +202,7 @@ service cloud.firestore {
         && data.genderPreference in ['all', 'female', 'male', 'neutral']
         && data.selectedTheme in ['santa', 'chocolate', 'funny']
         && data.hasJoined is bool
+        && (!('hasGoldenDetectiveCrown' in data) || data.hasGoldenDetectiveCrown is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -299,11 +300,12 @@ service cloud.firestore {
 
     function isValidSantaGuess(data) {
       return data.keys().hasAll(['eventId', 'participantKey', 'guesses', 'updatedAt'])
-        && data.keys().hasOnly(['eventId', 'participantKey', 'guesses', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'participantKey', 'guesses', 'goldenEnvelopeOpened', 'updatedAt'])
         && isValidId(data.eventId)
         && isValidHashId(data.participantKey)
         && data.guesses is list
         && data.guesses.size() <= 10
+        && (!('goldenEnvelopeOpened' in data) || data.goldenEnvelopeOpened is bool)
         && data.updatedAt is timestamp;
     }
 
@@ -638,7 +640,8 @@ service cloud.firestore {
         && (
           isAdmin()
           || (
-            exists(/databases/$(database)/documents/events/$(incoming().eventId))
+            (!('hasGoldenDetectiveCrown' in incoming()) || incoming().hasGoldenDetectiveCrown == false)
+            && exists(/databases/$(database)/documents/events/$(incoming().eventId))
             && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.registrationOpen == true
             && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == false
           )
@@ -651,10 +654,21 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin()
+          // Action 1: Participant profile / theme edit (cannot self-grant crown)
           || (
             incoming().diff(existing()).affectedKeys().hasOnly([
               'name', 'address', 'hobbies', 'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined', 'updatedAt'
             ])
+          )
+          // Action 2: Claim permanent Golden Detective Crown after Reveal Day with recorded detective guess
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly(['hasGoldenDetectiveCrown', 'updatedAt'])
+            && incoming().hasGoldenDetectiveCrown == true
+            && exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.santaIdentityRevealAt <= request.time
+            && exists(/databases/$(database)/documents/santaGuesses/$(participantKey))
+            && get(/databases/$(database)/documents/santaGuesses/$(participantKey)).data.guesses.size() >= 1
           )
         );
       allow delete: if isValidHashId(participantKey) && isAdmin();
@@ -790,7 +804,7 @@ service cloud.firestore {
       }
     }
 
-    // FEATURE 2: Guess Your Santa (Monotonic append-only, server enforces maxGuesses)
+    // FEATURE 2: Guess Your Santa (Monotonic append-only, server enforces maxGuesses + 1% Secret Golden Envelope)
     match /santaGuesses/{participantKey} {
       allow get: if isValidHashId(participantKey);
       allow list: if isAdmin();
@@ -798,6 +812,7 @@ service cloud.firestore {
         && isValidSantaGuess(incoming())
         && incoming().participantKey == participantKey
         && incoming().updatedAt == request.time
+        && (!('goldenEnvelopeOpened' in incoming()) || incoming().goldenEnvelopeOpened == false)
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
         && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
         && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.guessingEnabled == true
@@ -809,6 +824,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin()
+          // Action 1: Append detective guess before limit
           || (
             exists(/databases/$(database)/documents/events/$(existing().eventId))
             && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
@@ -816,6 +832,15 @@ service cloud.firestore {
             && incoming().guesses.size() >= existing().guesses.size()
             && incoming().guesses.size() <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.maxGuesses
             && incoming().diff(existing()).affectedKeys().hasOnly(['guesses', 'updatedAt'])
+          )
+          // Action 2: Unseal The 1% Santa Secret golden envelope strictly after Reveal Day
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.santaIdentityRevealAt <= request.time
+            && existing().guesses.size() >= 1
+            && incoming().goldenEnvelopeOpened == true
+            && incoming().diff(existing()).affectedKeys().hasOnly(['goldenEnvelopeOpened', 'updatedAt'])
           )
         );
       allow delete: if isValidHashId(participantKey) && isAdmin();

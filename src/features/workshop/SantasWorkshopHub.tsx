@@ -90,6 +90,7 @@ interface SantasWorkshopHubProps {
   requestedFeature?: WorkshopFeatureId | null;
   onClearRequestedFeature?: () => void;
   onTriggerGrandReveal?: () => void;
+  onOpenGoldenSecretEnvelope?: () => Promise<void> | void;
 }
 
 const DEMO_PREVIEW_ROSTER: PublicRosterEntry[] = [
@@ -131,6 +132,7 @@ export const SantasWorkshopHub: React.FC<SantasWorkshopHubProps> = ({
   requestedFeature,
   onClearRequestedFeature,
   onTriggerGrandReveal,
+  onOpenGoldenSecretEnvelope,
 }) => {
   const cfg = THEME_CONFIGS[theme];
   const liveMatchedMode = isLiveFirestoreEvent && event.isMatched;
@@ -406,7 +408,7 @@ export const SantasWorkshopHub: React.FC<SantasWorkshopHubProps> = ({
         title: 'Track & Confirm My Gift',
         subtitle:
           incomingAck?.status === 'received'
-            ? '✅ Gift receipt confirmed! Send a thank-you card'
+            ? 'Gift receipt confirmed! Send a thank-you card'
             : incomingDelivery
               ? `Status: ${getDeliveryStageInfo(incomingDelivery.stage).emoji} ${getDeliveryStageInfo(incomingDelivery.stage).label}`
               : 'Watch Santa’s sleigh & confirm receipt independently',
@@ -603,12 +605,14 @@ export const SantasWorkshopHub: React.FC<SantasWorkshopHubProps> = ({
           <GuessYourSantaView
             theme={theme}
             event={event}
+            participant={participant}
             participantKey={participant.id}
             selfPublicId={selfPublicId}
             roster={effectiveRoster}
             santaReveal={santaIdentityReady ? santaReveal : null}
             serverNow={clock.serverNow}
-            liveMode={isLiveFirestoreEvent}
+            liveMode={liveMatchedMode}
+            onOpenGoldenEnvelope={onOpenGoldenSecretEnvelope}
           />
         );
       case 'dislikes':

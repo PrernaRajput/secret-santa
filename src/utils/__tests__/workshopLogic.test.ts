@@ -7,6 +7,7 @@ import {
   getDailyElfChallenge,
   getDeliveryStageInfo,
   getEventLocalDateKey,
+  hasCorrectSantaGuess,
   isGiftPreferencesEditable,
   isMailboxWindowOpen,
   isSenderIdentityRevealAuthorized,
@@ -347,5 +348,36 @@ describe('Phase 2 Santa Workshop Logic', () => {
     expect(isGiftPreferencesEditable(evt, new Date('2026-12-14T09:59:00Z'))).toBe(true);
     expect(isGiftPreferencesEditable(evt, new Date('2026-12-14T10:00:00Z'))).toBe(true);
     expect(isGiftPreferencesEditable(evt, new Date('2026-12-14T10:01:00Z'))).toBe(false);
+  });
+
+  it('detects correct Secret Santa guesses for The 1% Santa Secret unlock safely', () => {
+    const sampleGuesses = [
+      {
+        guessedPublicId: 'pub-meera',
+        guessedName: 'Meera Sharma',
+        guessedAvatarId: 'holly-princess',
+        reaction: 'Interesting theory!',
+        submittedAtIso: '2026-12-15T10:00:00Z',
+      },
+      {
+        guessedPublicId: 'pub-aarav',
+        guessedName: 'Aarav Verma',
+        guessedAvatarId: 'holiday-nerd-boy',
+        reaction: 'Rudolph refuses to comment.',
+        submittedAtIso: '2026-12-16T10:00:00Z',
+      },
+    ];
+
+    expect(hasCorrectSantaGuess(sampleGuesses, null)).toBe(false);
+    expect(hasCorrectSantaGuess([], { santaPublicId: 'pub-aarav', santaName: 'Aarav Verma' })).toBe(false);
+    expect(
+      hasCorrectSantaGuess(sampleGuesses, { santaPublicId: 'pub-aarav', santaName: 'Aarav Verma' })
+    ).toBe(true);
+    expect(
+      hasCorrectSantaGuess(sampleGuesses, { santaName: '  aarav verma  ' })
+    ).toBe(true);
+    expect(
+      hasCorrectSantaGuess(sampleGuesses, { santaPublicId: 'pub-kabir', santaName: 'Kabir Malhotra' })
+    ).toBe(false);
   });
 });

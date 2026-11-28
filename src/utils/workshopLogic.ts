@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import {
+import type {
   DeliveryStage,
   ElfHidingSpotId,
   GiftBudgetConfig,
@@ -9,7 +9,7 @@ import {
   SantaGuessItem,
   SecretSantaEvent,
   WheelPrizeDefinition,
-} from '../types/secretSanta';
+} from '../types/secretSanta.ts';
 import {
   DELIVERY_STAGES,
   DETECTIVE_REACTIONS,
@@ -18,7 +18,7 @@ import {
   NAUGHTY_NICE_QUESTIONS,
   NAUGHTY_NICE_QUIZ_VERSION,
   WHEEL_PRIZES,
-} from '../data/workshopContent';
+} from '../data/workshopContent.ts';
 
 /**
  * Formats an event-local calendar date key (YYYY-MM-DD) for the configured timezone
@@ -156,6 +156,23 @@ export function isSenderIdentityRevealAuthorized(event: SecretSantaEvent, server
 
 export function isGifteeRevealAuthorized(event: SecretSantaEvent, serverNow: Date): boolean {
   return event.isMatched && serverNow.getTime() >= event.gifteeRevealAt.getTime();
+}
+
+/**
+ * Checks whether any sealed detective guess matches the revealed Secret Santa identity.
+ * Used exclusively after Secret Santa Identity Reveal is authorized to unlock The 1% Santa Secret.
+ */
+export function hasCorrectSantaGuess(
+  guesses: SantaGuessItem[],
+  santaReveal: { santaPublicId?: string; santaName: string } | null
+): boolean {
+  if (!santaReveal || guesses.length === 0) return false;
+  const targetName = santaReveal.santaName.trim().toLowerCase();
+  return guesses.some(
+    (g) =>
+      (Boolean(santaReveal.santaPublicId) && g.guessedPublicId === santaReveal.santaPublicId) ||
+      (targetName.length > 0 && g.guessedName.trim().toLowerCase() === targetName)
+  );
 }
 
 // ---------- Delivery Stage Transitions ----------

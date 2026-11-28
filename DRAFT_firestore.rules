@@ -191,7 +191,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'eventId', 'invitationHash', 'name', 'address', 'hobbies',
           'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined',
-          'createdAt', 'updatedAt'
+          'hasGoldenDetectiveCrown', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.eventId)
         && (data.invitationHash == '' || isValidHashId(data.invitationHash))
@@ -202,6 +202,7 @@ service cloud.firestore {
         && data.genderPreference in ['all', 'female', 'male', 'neutral']
         && data.selectedTheme in ['santa', 'chocolate', 'funny']
         && data.hasJoined is bool
+        && (!('hasGoldenDetectiveCrown' in data) || data.hasGoldenDetectiveCrown is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -299,11 +300,12 @@ service cloud.firestore {
 
     function isValidSantaGuess(data) {
       return data.keys().hasAll(['eventId', 'participantKey', 'guesses', 'updatedAt'])
-        && data.keys().hasOnly(['eventId', 'participantKey', 'guesses', 'updatedAt'])
+        && data.keys().hasOnly(['eventId', 'participantKey', 'guesses', 'goldenEnvelopeOpened', 'updatedAt'])
         && isValidId(data.eventId)
         && isValidHashId(data.participantKey)
         && data.guesses is list
         && data.guesses.size() <= 10
+        && (!('goldenEnvelopeOpened' in data) || data.goldenEnvelopeOpened is bool)
         && data.updatedAt is timestamp;
     }
 
@@ -473,6 +475,27 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidSharedDislikes(data) {
+      return data.keys().hasAll([
+          'eventId', 'assignmentId', 'isShared', 'dislikedCategories', 'dietaryRestrictions',
+          'dislikedColors', 'alreadyOwned', 'nonFoodNotes', 'generalNotes', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'eventId', 'assignmentId', 'isShared', 'dislikedCategories', 'dietaryRestrictions',
+          'dislikedColors', 'alreadyOwned', 'nonFoodNotes', 'generalNotes', 'updatedAt'
+        ])
+        && isValidId(data.eventId)
+        && isValidHashId(data.assignmentId)
+        && data.isShared is bool
+        && isValidBoundedStringList(data.dislikedCategories, 12, 60)
+        && isValidBoundedStringList(data.dietaryRestrictions, 8, 60)
+        && isValidBoundedStringList(data.dislikedColors, 8, 40)
+        && isValidBoundedStringList(data.alreadyOwned, 10, 60)
+        && isValidOptionalString(data.nonFoodNotes, 240)
+        && isValidOptionalString(data.generalNotes, 300)
+        && data.updatedAt is timestamp;
+    }
+
     function isValidThankYouCard(data) {
       return data.keys().hasAll(['eventId', 'assignmentId', 'templateId', 'message', 'reactions', 'createdAt'])
         && data.keys().hasOnly(['eventId', 'assignmentId', 'templateId', 'message', 'reactions', 'createdAt'])
@@ -594,6 +617,11 @@ service cloud.firestore {
             && existing().expiresAt > request.time
             && incoming().status == 'claimed'
             && isValidHashId(incoming().participantKey)
+            && (
+              !('isRecovery' in existing())
+              || existing().isRecovery == false
+              || incoming().participantKey == existing().recoveryParticipantKey
+            )
             && incoming().claimedAt == request.time
             && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'participantKey', 'claimedAt', 'updatedAt'])
           )
@@ -612,7 +640,8 @@ service cloud.firestore {
         && (
           isAdmin()
           || (
-            exists(/databases/$(database)/documents/events/$(incoming().eventId))
+            (!('hasGoldenDetectiveCrown' in incoming()) || incoming().hasGoldenDetectiveCrown == false)
+            && exists(/databases/$(database)/documents/events/$(incoming().eventId))
             && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.registrationOpen == true
             && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == false
           )
@@ -625,10 +654,21 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin()
+          // Action 1: Participant profile / theme edit (cannot self-grant crown)
           || (
             incoming().diff(existing()).affectedKeys().hasOnly([
               'name', 'address', 'hobbies', 'avatarId', 'genderPreference', 'selectedTheme', 'hasJoined', 'updatedAt'
             ])
+          )
+          // Action 2: Claim permanent Golden Detective Crown after Reveal Day with recorded detective guess
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly(['hasGoldenDetectiveCrown', 'updatedAt'])
+            && incoming().hasGoldenDetectiveCrown == true
+            && exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.santaIdentityRevealAt <= request.time
+            && exists(/databases/$(database)/documents/santaGuesses/$(participantKey))
+            && get(/databases/$(database)/documents/santaGuesses/$(participantKey)).data.guesses.size() >= 1
           )
         );
       allow delete: if isValidHashId(participantKey) && isAdmin();
@@ -757,7 +797,6 @@ service cloud.firestore {
           && (
             isAdmin()
             || (
-              // Action: Mark read or report abuse
               incoming().diff(existing()).affectedKeys().hasOnly(['readByOther', 'reported', 'reportReason'])
             )
           );
@@ -765,7 +804,7 @@ service cloud.firestore {
       }
     }
 
-    // FEATURE 2: Guess Your Santa (Monotonic append-only, server enforces maxGuesses)
+    // FEATURE 2: Guess Your Santa (Monotonic append-only, server enforces maxGuesses + 1% Secret Golden Envelope)
     match /santaGuesses/{participantKey} {
       allow get: if isValidHashId(participantKey);
       allow list: if isAdmin();
@@ -773,6 +812,7 @@ service cloud.firestore {
         && isValidSantaGuess(incoming())
         && incoming().participantKey == participantKey
         && incoming().updatedAt == request.time
+        && (!('goldenEnvelopeOpened' in incoming()) || incoming().goldenEnvelopeOpened == false)
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
         && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
         && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.guessingEnabled == true
@@ -784,6 +824,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin()
+          // Action 1: Append detective guess before limit
           || (
             exists(/databases/$(database)/documents/events/$(existing().eventId))
             && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
@@ -791,6 +832,15 @@ service cloud.firestore {
             && incoming().guesses.size() >= existing().guesses.size()
             && incoming().guesses.size() <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.maxGuesses
             && incoming().diff(existing()).affectedKeys().hasOnly(['guesses', 'updatedAt'])
+          )
+          // Action 2: Unseal The 1% Santa Secret golden envelope strictly after Reveal Day
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
+            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.santaIdentityRevealAt <= request.time
+            && existing().guesses.size() >= 1
+            && incoming().goldenEnvelopeOpened == true
+            && incoming().diff(existing()).affectedKeys().hasOnly(['goldenEnvelopeOpened', 'updatedAt'])
           )
         );
       allow delete: if isValidHashId(participantKey) && isAdmin();
@@ -809,7 +859,10 @@ service cloud.firestore {
           isAdmin()
           || (
             get(/databases/$(database)/documents/events/$(incoming().eventId)).data.isMatched == true
-            && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.deliveryTrackingEnabled == true
+            && (
+              !('deliveryTrackingEnabled' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data)
+              || get(/databases/$(database)/documents/events/$(incoming().eventId)).data.deliveryTrackingEnabled == true
+            )
           )
         );
       allow update: if isValidHashId(assignmentId)
@@ -822,7 +875,10 @@ service cloud.firestore {
           || (
             exists(/databases/$(database)/documents/events/$(existing().eventId))
             && get(/databases/$(database)/documents/events/$(existing().eventId)).data.isMatched == true
-            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.deliveryTrackingEnabled == true
+            && (
+              !('deliveryTrackingEnabled' in get(/databases/$(database)/documents/events/$(existing().eventId)).data)
+              || get(/databases/$(database)/documents/events/$(existing().eventId)).data.deliveryTrackingEnabled == true
+            )
             && incoming().diff(existing()).affectedKeys().hasOnly(['stage', 'history', 'sharedNote', 'updatedAt'])
           )
         );
@@ -904,7 +960,10 @@ service cloud.firestore {
         && isValidWheelSpin(incoming())
         && incoming().spunAt == request.time
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
-        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.wheelEnabled == true;
+        && (
+          !('wheelEnabled' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data)
+          || get(/databases/$(database)/documents/events/$(incoming().eventId)).data.wheelEnabled == true
+        );
       allow update: if false;
       allow delete: if isValidScopedId(spinId) && isAdmin();
     }
@@ -917,7 +976,11 @@ service cloud.firestore {
         && isValidQuizResult(incoming())
         && incoming().participantKey == participantKey
         && incoming().completedAt == request.time
-        && exists(/databases/$(database)/documents/events/$(incoming().eventId));
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          !('quizEnabled' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data)
+          || get(/databases/$(database)/documents/events/$(incoming().eventId)).data.quizEnabled == true
+        );
       allow update: if isValidHashId(participantKey)
         && isValidQuizResult(incoming())
         && incoming().eventId == existing().eventId
@@ -927,7 +990,10 @@ service cloud.firestore {
           isAdmin()
           || (
             exists(/databases/$(database)/documents/events/$(existing().eventId))
-            && get(/databases/$(database)/documents/events/$(existing().eventId)).data.quizAllowRetake == true
+            && (
+              !('quizAllowRetake' in get(/databases/$(database)/documents/events/$(existing().eventId)).data)
+              || get(/databases/$(database)/documents/events/$(existing().eventId)).data.quizAllowRetake == true
+            )
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'quizVersion', 'nicePercent', 'naughtyPercent', 'verdictTitle',
               'verdictSubtitle', 'stampLabel', 'answers', 'completedAt'
@@ -945,7 +1011,10 @@ service cloud.firestore {
         && isValidElfDiscovery(incoming())
         && incoming().discoveredAt == request.time
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
-        && get(/databases/$(database)/documents/events/$(incoming().eventId)).data.elfChallengeEnabled == true;
+        && (
+          !('elfChallengeEnabled' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data)
+          || get(/databases/$(database)/documents/events/$(incoming().eventId)).data.elfChallengeEnabled == true
+        );
       allow update: if false;
       allow delete: if isValidScopedId(discoveryId) && isAdmin();
     }
@@ -984,7 +1053,11 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/events/$(incoming().eventId))
         && (
           isAdmin()
-          || request.time <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.giftPreferencesCutoffAt
+          || (
+            'giftPreferencesCutoffAt' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data
+              ? request.time <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.giftPreferencesCutoffAt
+              : request.time <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.gifteeRevealAt
+          )
         );
       allow update: if isValidHashId(participantKey)
         && isValidGiftPreferences(incoming())
@@ -995,7 +1068,11 @@ service cloud.firestore {
           isAdmin()
           || (
             exists(/databases/$(database)/documents/events/$(existing().eventId))
-            && request.time <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.giftPreferencesCutoffAt
+            && (
+              'giftPreferencesCutoffAt' in get(/databases/$(database)/documents/events/$(existing().eventId)).data
+                ? request.time <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.giftPreferencesCutoffAt
+                : request.time <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.gifteeRevealAt
+            )
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'dislikedCategories', 'dietaryRestrictions', 'dislikedColors', 'alreadyOwned',
               'nonFoodNotes', 'generalNotes', 'shareWithSanta', 'shareDietaryWithSanta', 'updatedAt'
@@ -1003,6 +1080,46 @@ service cloud.firestore {
           )
         );
       allow delete: if isValidHashId(participantKey) && isAdmin();
+    }
+
+    // FEATURE 10B: Anonymous Assignment-Scoped Shared Dislikes Mirror (Post-match pre-cutoff sync)
+    match /sharedDislikes/{assignmentId} {
+      allow get: if isValidHashId(assignmentId);
+      allow list: if isAdmin();
+      allow create: if isValidHashId(assignmentId)
+        && isValidSharedDislikes(incoming())
+        && incoming().assignmentId == assignmentId
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/events/$(incoming().eventId))
+        && (
+          isAdmin()
+          || (
+            'giftPreferencesCutoffAt' in get(/databases/$(database)/documents/events/$(incoming().eventId)).data
+              ? request.time <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.giftPreferencesCutoffAt
+              : request.time <= get(/databases/$(database)/documents/events/$(incoming().eventId)).data.gifteeRevealAt
+          )
+        );
+      allow update: if isValidHashId(assignmentId)
+        && isValidSharedDislikes(incoming())
+        && incoming().eventId == existing().eventId
+        && incoming().assignmentId == existing().assignmentId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            exists(/databases/$(database)/documents/events/$(existing().eventId))
+            && (
+              'giftPreferencesCutoffAt' in get(/databases/$(database)/documents/events/$(existing().eventId)).data
+                ? request.time <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.giftPreferencesCutoffAt
+                : request.time <= get(/databases/$(database)/documents/events/$(existing().eventId)).data.gifteeRevealAt
+            )
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'isShared', 'dislikedCategories', 'dietaryRestrictions', 'dislikedColors',
+              'alreadyOwned', 'nonFoodNotes', 'generalNotes', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidHashId(assignmentId) && isAdmin();
     }
 
     // FEATURE 13: Animated Thank-You Cards (Unlocked only after confirmed receipt)
@@ -1048,6 +1165,7 @@ service cloud.firestore {
       allow create: if isValidId(requestId)
         && isValidRecoveryRequest(incoming())
         && incoming().status == 'pending'
+        && !('resolvedBy' in incoming())
         && incoming().createdAt == request.time
         && exists(/databases/$(database)/documents/events/$(incoming().eventId));
       allow update: if isValidId(requestId)

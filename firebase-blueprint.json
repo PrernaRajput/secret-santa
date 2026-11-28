@@ -97,6 +97,7 @@
         "genderPreference": { "type": "string", "enum": ["all", "female", "male", "neutral"] },
         "selectedTheme": { "type": "string", "enum": ["santa", "chocolate", "funny"] },
         "hasJoined": { "type": "boolean" },
+        "hasGoldenDetectiveCrown": { "type": "boolean", "description": "Permanent rare cosmetic unlocked by correctly guessing their Secret Santa (The 1% Santa Secret)." },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -205,6 +206,7 @@
         "eventId": { "type": "string", "maxLength": 128 },
         "participantKey": { "type": "string", "maxLength": 64 },
         "guesses": { "type": "array" },
+        "goldenEnvelopeOpened": { "type": "boolean", "description": "Whether the participant has opened their mysterious golden envelope after Reveal Day." },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["eventId", "participantKey", "guesses", "updatedAt"]

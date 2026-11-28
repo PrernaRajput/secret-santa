@@ -279,6 +279,49 @@ export function playMagicSparkleSound() {
 }
 
 /**
+ * Plays a mysterious, regal golden shimmer fanfare when breaking the wax seal
+ * of The 1% Santa Secret golden envelope.
+ */
+export function playGoldenSecretFanfare() {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // Deep warm golden brass/pad swell
+  const padNotes = [220, 277.18, 329.63, 440];
+  padNotes.forEach((freq) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.065, now + 0.25);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.85);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 1.9);
+  });
+
+  // Shimmering celestial harp arpeggio in A major9
+  const arpeggio = [440, 554.37, 659.25, 830.61, 987.77, 1108.73, 1318.51, 1760];
+  arpeggio.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    const t = now + 0.08 + i * 0.075;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.14, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0008, t + 0.9);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.95);
+  });
+}
+
+/**
  * Plays the Jingle Bells audio clip on Secret Santa reveal (Christmas theme only),
  * respecting the global mute toggle, with a Web Audio chime fallback.
  */

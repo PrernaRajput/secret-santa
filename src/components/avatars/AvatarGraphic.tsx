@@ -5,19 +5,22 @@ interface AvatarGraphicProps {
   avatarId: string;
   size?: number;
   className?: string;
+  hasGoldenCrown?: boolean;
 }
 
 /**
  * Renders 20 distinct, glossy 3D-shaded cartoon Christmas character portraits.
  * Each character has unique headwear, hair silhouette, expression, and winter attire.
+ * Supports the permanent rare Golden Detective Crown cosmetic from The 1% Santa Secret.
  */
 export const AvatarGraphic: React.FC<AvatarGraphicProps> = ({
   avatarId,
   size = 76,
   className = '',
+  hasGoldenCrown = false,
 }) => {
   const av = getAvatarById(avatarId);
-  const uid = `av-${av.id}-${size}`;
+  const uid = `av-${av.id}-${size}${hasGoldenCrown ? '-crown' : ''}`;
   const isGingerbread = av.hatStyle === 'gingerbread';
 
   return (
@@ -43,6 +46,25 @@ export const AvatarGraphic: React.FC<AvatarGraphicProps> = ({
           <stop offset="0%" stopColor="#ffffff" stopOpacity="0.5" />
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </linearGradient>
+        {hasGoldenCrown && (
+          <>
+            <linearGradient id={`${uid}-gold-crown`} x1="28" y1="4" x2="92" y2="34" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#fef9c3" />
+              <stop offset="32%" stopColor="#facc15" />
+              <stop offset="68%" stopColor="#eab308" />
+              <stop offset="100%" stopColor="#b45309" />
+            </linearGradient>
+            <linearGradient id={`${uid}-gold-rim`} x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#fef08a" />
+              <stop offset="50%" stopColor="#eab308" />
+              <stop offset="100%" stopColor="#b45309" />
+            </linearGradient>
+            <radialGradient id={`${uid}-gold-halo`} cx="50%" cy="18%" r="48%">
+              <stop offset="0%" stopColor="#fde047" stopOpacity="0.48" />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0" />
+            </radialGradient>
+          </>
+        )}
       </defs>
 
       {/* Soft rounded 3D tile background */}
@@ -314,6 +336,74 @@ export const AvatarGraphic: React.FC<AvatarGraphicProps> = ({
           <circle cx="48" cy="31" r="1.5" fill="#0f172a" />
           <circle cx="72" cy="31" r="1.5" fill="#0f172a" />
           <path d="M55 34 L65 34 L60 40 Z" fill="#f97316" />
+        </g>
+      )}
+
+      {/* Permanent Rare Cosmetic: Golden Detective Crown (The 1% Santa Secret) */}
+      {hasGoldenCrown && (
+        <g aria-label="Golden Detective Crown">
+          {/* Warm golden halo behind crown */}
+          <ellipse cx="60" cy="18" rx="34" ry="16" fill={`url(#${uid}-gold-halo)`} />
+
+          {/* Brushed gold rare border frame */}
+          <rect
+            x="2.2"
+            y="2.2"
+            width="115.6"
+            height="115.6"
+            rx="26"
+            fill="none"
+            stroke={`url(#${uid}-gold-rim)`}
+            strokeWidth="4.4"
+          />
+
+          {/* Sculpted Royal Golden Detective Crown */}
+          <g transform="translate(0, 1)">
+            {/* Subtle crown drop shadow */}
+            <path
+              d="M35 28 L31 12 L46 20 L60 6 L74 20 L89 12 L85 28 Z"
+              fill="#78350f"
+              fillOpacity="0.35"
+              transform="translate(0, 2)"
+            />
+            {/* Main metallic gold crown body */}
+            <path
+              d="M35 28 L31 12 L46 20 L60 6 L74 20 L89 12 L85 28 Z"
+              fill={`url(#${uid}-gold-crown)`}
+              stroke="#78350f"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+            />
+            {/* Crown specular ridge highlight */}
+            <path
+              d="M37 25 L35 15 L47 22 L60 9 L73 22 L85 15 L83 25 Z"
+              fill="#fef9c3"
+              fillOpacity="0.35"
+            />
+            {/* Crown velvet-gold band */}
+            <rect
+              x="34"
+              y="25"
+              width="52"
+              height="6.5"
+              rx="3.2"
+              fill="#b45309"
+              stroke="#fef08a"
+              strokeWidth="1.1"
+            />
+            {/* Crown spire pearls */}
+            <circle cx="31" cy="11.5" r="2.7" fill="#fef08a" stroke="#92400e" strokeWidth="1" />
+            <circle cx="60" cy="5.8" r="3.2" fill="#fef9c3" stroke="#92400e" strokeWidth="1" />
+            <circle cx="89" cy="11.5" r="2.7" fill="#fef08a" stroke="#92400e" strokeWidth="1" />
+            {/* Center detective crest emblem (ruby gem + golden lens glint) */}
+            <circle cx="60" cy="28.2" r="3.4" fill="#dc2626" stroke="#fef08a" strokeWidth="1.1" />
+            <circle cx="59.1" cy="27.3" r="1" fill="#fecaca" />
+            <circle cx="46" cy="28.2" r="2" fill="#10b981" stroke="#fef08a" strokeWidth="0.8" />
+            <circle cx="74" cy="28.2" r="2" fill="#10b981" stroke="#fef08a" strokeWidth="0.8" />
+            {/* Subtle 4-point gold starlight sparkles */}
+            <path d="M21 15 L22.5 11 L24 15 L28 16.5 L24 18 L22.5 22 L21 18 L17 16.5 Z" fill="#fef08a" />
+            <path d="M96 14 L97.2 11 L98.4 14 L101.4 15.2 L98.4 16.4 L97.2 19.4 L96 16.4 L93 15.2 Z" fill="#fde047" />
+          </g>
         </g>
       )}
     </svg>

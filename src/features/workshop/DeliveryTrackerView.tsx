@@ -327,8 +327,16 @@ export const DeliveryTrackerView: React.FC<DeliveryTrackerViewProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Snowy North Pole Sleigh Map */}
-      <div className="rounded-3xl bg-gradient-to-b from-sky-950 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 relative overflow-hidden shadow-xl border border-white/15">
+      {/* Theme-Matched North Pole Sleigh Map */}
+      <div
+        className={`rounded-3xl p-5 sm:p-6 relative overflow-hidden shadow-xl border transition-colors ${
+          theme === 'chocolate'
+            ? 'bg-gradient-to-b from-[#3d1c06] via-[#5c2d0c] to-[#2b1409] text-[#fff7ed] border-[#c69563]/45'
+            : theme === 'funny'
+              ? 'bg-gradient-to-b from-[#581c87] via-[#831843] to-[#7c2d12] text-amber-50 border-amber-400/45'
+              : 'bg-gradient-to-b from-indigo-950 via-indigo-900 to-slate-900 text-white border-white/15'
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
@@ -341,7 +349,7 @@ export const DeliveryTrackerView: React.FC<DeliveryTrackerViewProps> = ({
             </h2>
           </div>
 
-          <span className="px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-semibold text-sky-100">
+          <span className="px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-semibold text-amber-100">
             {loadingProgress
               ? 'Loading from database...'
               : `Checkpoint ${currentStageIdx + 1} of ${DELIVERY_STAGES.length}`}
@@ -392,7 +400,7 @@ export const DeliveryTrackerView: React.FC<DeliveryTrackerViewProps> = ({
                   </div>
                   <p
                     className={`text-[10px] sm:text-xs font-semibold leading-tight ${
-                      reached ? 'text-amber-100' : 'text-slate-400'
+                      reached ? 'text-amber-100' : 'text-white/55'
                     }`}
                   >
                     {st.label}
@@ -404,7 +412,7 @@ export const DeliveryTrackerView: React.FC<DeliveryTrackerViewProps> = ({
         </div>
 
         {/* Playful Anonymous Status Message */}
-        <div className="mt-4 rounded-2xl bg-white/10 border border-white/15 px-4 py-3 text-xs sm:text-sm text-sky-50 flex items-center gap-2.5">
+        <div className="mt-4 rounded-2xl bg-white/10 border border-white/15 px-4 py-3 text-xs sm:text-sm text-amber-50 flex items-center gap-2.5">
           <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
           <span>
             {mode === 'recipient'
@@ -420,7 +428,7 @@ export const DeliveryTrackerView: React.FC<DeliveryTrackerViewProps> = ({
         )}
 
         {!liveMode && (
-          <p className="mt-2 text-[11px] text-sky-200/80 px-1">
+          <p className="mt-2 text-[11px] text-amber-100/80 px-1">
             Interactive preview mode — once the organizer runs matching, live checkpoints sync automatically between Santa and giftee.
           </p>
         )}

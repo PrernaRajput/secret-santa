@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Home, Shield, Sparkles, Volume2, VolumeX } from 'lucide-react';
 import {
@@ -31,6 +31,12 @@ import { AvatarScreen } from './features/avatars/AvatarScreen';
 import { DetailsScreen } from './features/onboarding/DetailsScreen';
 import { CountdownAndRevealHub } from './features/countdown/CountdownAndRevealHub';
 import { AdminDashboard } from './features/admin/AdminDashboard';
+import { GoldenWorldOverlay } from './components/secret/GoldenWorldOverlay';
+import {
+  openGoldenSecretEnvelope,
+  readSandboxGoldenCrown,
+} from './services/workshopService';
+import { WORKSHOP_DATA_RESET_EVENT } from './services/adminTestingResetService';
 
 const THEME_PREF_KEY = 'ss_theme_pref_v1';
 const SESSION_KEY_STORE = 'ss_participant_session_key_v1';
@@ -84,6 +90,7 @@ export default function App() {
   const [participant, setParticipant] = useState<ParticipantProfile | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
   const [justJoinedCelebration, setJustJoinedCelebration] = useState(false);
+  const [goldenWorldActive, setGoldenWorldActive] = useState(false);
 
   const handleSelectTheme = useCallback(
     (nextTheme: ThemeId) => {
@@ -142,6 +149,58 @@ export default function App() {
       setIsLiveFirestoreEvent(true);
     }
   }, []);
+
+  // Re-sync Golden Detective Crown cosmetic state if Admin resets guesses during pre-publish testing
+  useEffect(() => {
+    const onWorkshopReset = (evt: Event) => {
+      const detail = (evt as CustomEvent<{ targets?: string[] }>).detail;
+      if (!detail?.targets?.includes('guesses')) return;
+      setParticipant((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, hasGoldenDetectiveCrown: false };
+        try {
+          window.sessionStorage.setItem(SESSION_DRAFT_STORE, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    };
+    window.addEventListener(WORKSHOP_DATA_RESET_EVENT, onWorkshopReset);
+    return () => window.removeEventListener(WORKSHOP_DATA_RESET_EVENT, onWorkshopReset);
+  }, []);
+
+  // Hydrate event-scoped sandbox crown for preview/sandbox sessions
+  useEffect(() => {
+    if (!participant || participant.hasGoldenDetectiveCrown) return;
+    if (readSandboxGoldenCrown(event.id, participant.id)) {
+      setParticipant((prev) => (prev ? { ...prev, hasGoldenDetectiveCrown: true } : prev));
+    }
+  }, [event.id, participant]);
+
+  const handleOpenGoldenSecretEnvelope = useCallback(async () => {
+    if (!participant) return;
+    setGoldenWorldActive(true);
+    setParticipant((prev) => {
+      if (!prev) return prev;
+      const next: ParticipantProfile = { ...prev, hasGoldenDetectiveCrown: true };
+      try {
+        window.sessionStorage.setItem(SESSION_DRAFT_STORE, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+    try {
+      await openGoldenSecretEnvelope({
+        participantKey: participant.id,
+        eventId: event.id,
+        liveMode: isLiveFirestoreEvent && event.isMatched,
+      });
+    } catch {
+      // Non-blocking: local crown state and golden world reveal remain active
+    }
+  }, [event.id, event.isMatched, isLiveFirestoreEvent, participant]);
 
   // Process URL ?token=<256-bit-token> OR restore active browser-tab session
   useEffect(() => {
@@ -359,12 +418,20 @@ export default function App() {
           onOpenAdmin={() => setShowAdmin(true)}
         />
       ) : (
-        /* Full 3-Theme Animated Secret Santa World */
-        <div className="relative min-h-screen w-full flex flex-col">
+        /* Full 3-Theme Animated Secret Santa World (briefly gilded during The 1% Santa Secret) */
+        <div
+          className={`relative min-h-screen w-full flex flex-col transition-[filter] duration-700 ${
+            goldenWorldActive ? 'sepia-[0.55] saturate-150 brightness-105' : ''
+          }`}
+        >
           <ThemeBackdrop theme={theme} />
 
           {/* Clean Top Bar (3-zone layout) */}
-          <header className="relative z-20 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-4 pb-2 flex items-center justify-between gap-4">
+          <header
+            className={`relative z-20 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-4 pb-2 flex items-center justify-between gap-4 transition-colors duration-500 ${
+              goldenWorldActive ? 'text-amber-100' : ''
+            }`}
+          >
             <button
               type="button"
               onClick={() => {
@@ -582,6 +649,7 @@ export default function App() {
                   theme={theme}
                   selectedAvatarId={selectedAvatarId}
                   genderFilter={genderFilter}
+                  hasGoldenCrown={Boolean(participant?.hasGoldenDetectiveCrown)}
                   onSelectAvatar={setSelectedAvatarId}
                   onChangeGenderFilter={setGenderFilter}
                   onContinue={() => setStep('details')}
@@ -612,6 +680,7 @@ export default function App() {
                   celebrateOnMount={justJoinedCelebration}
                   onCelebrationComplete={() => setJustJoinedCelebration(false)}
                   onEditDetails={() => setStep('details')}
+                  onOpenGoldenSecretEnvelope={handleOpenGoldenSecretEnvelope}
                 />
               )}
             </AnimatePresence>
@@ -620,6 +689,16 @@ export default function App() {
           {/* Persistent Semicircular 3-Theme Carousel & Required Footer */}
           <ThemeCarousel theme={theme} onSelectTheme={handleSelectTheme} />
         </div>
+      )}
+
+      {/* The 1% Santa Secret — Full-Website Hidden Golden Christmas World Transformation */}
+      {participant && (
+        <GoldenWorldOverlay
+          active={goldenWorldActive}
+          participantName={participant.name}
+          participantAvatarId={participant.avatarId}
+          onDismiss={() => setGoldenWorldActive(false)}
+        />
       )}
 
       {/* Secure Admin Dashboard Modal */}

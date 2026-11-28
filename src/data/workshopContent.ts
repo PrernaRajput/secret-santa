@@ -1,4 +1,4 @@
-import {
+import type {
   AdventDaySurprise,
   DeliveryStage,
   ElfHidingSpotId,
@@ -7,7 +7,7 @@ import {
   GingerbreadShape,
   ThankYouTemplateId,
   WheelPrizeDefinition,
-} from '../types/secretSanta';
+} from '../types/secretSanta.ts';
 
 export const MAILBOX_SUGGESTED_QUESTIONS: string[] = [
   "What's your favorite chocolate?",

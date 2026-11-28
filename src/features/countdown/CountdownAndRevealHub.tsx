@@ -34,14 +34,21 @@ import {
   fetchMySecretSantaIdentity,
 } from '../../services/secretSantaService';
 import {
+  fetchMySantaGuesses,
   subscribeToDeliveryAcknowledgment,
   subscribeToDeliveryProgress,
   subscribeToIncomingAssignment,
 } from '../../services/workshopService';
+import { WORKSHOP_DATA_RESET_EVENT } from '../../services/adminTestingResetService';
 import { DELIVERY_STAGES } from '../../data/workshopContent';
 import { playChimeSound, playPopSound } from '../../utils/sound';
 import { JoinConfettiCanvas } from '../../components/animations/JoinConfettiCanvas';
-import { formatBudgetGuide, getDeliveryStageInfo } from '../../utils/workshopLogic';
+import {
+  formatBudgetGuide,
+  getDeliveryStageInfo,
+  hasCorrectSantaGuess,
+} from '../../utils/workshopLogic';
+import { GoldenSecretEnvelope } from '../../components/secret/GoldenSecretEnvelope';
 import { SantasWorkshopHub } from '../workshop/SantasWorkshopHub';
 
 interface CountdownAndRevealHubProps {
@@ -54,6 +61,7 @@ interface CountdownAndRevealHubProps {
   celebrateOnMount?: boolean;
   onCelebrationComplete?: () => void;
   onEditDetails: () => void;
+  onOpenGoldenSecretEnvelope?: () => Promise<void> | void;
 }
 
 interface TimeParts {
@@ -156,6 +164,7 @@ const DEMO_PREVIEW_GIFTEE: MatchAssignment = {
 const DEMO_PREVIEW_SANTA: SantaIdentityReveal = {
   eventId: 'preview',
   recipientKey: 'preview',
+  santaPublicId: 'demo-aarav',
   santaName: 'Aarav Verma',
   santaAvatarId: 'holiday-nerd-boy',
   santaHobbies: ['Gaming', 'Technology', 'Anime', 'Coffee'],
@@ -171,6 +180,7 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
   celebrateOnMount = false,
   onCelebrationComplete,
   onEditDetails,
+  onOpenGoldenSecretEnvelope,
 }) => {
   const cfg = THEME_CONFIGS[theme];
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -178,6 +188,10 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
   const [santaReveal, setSantaReveal] = useState<SantaIdentityReveal | null>(null);
   const [gifteeRevealed, setGifteeRevealed] = useState(false);
   const [santaRevealed, setSantaRevealed] = useState(false);
+  const [goldenSecretUnlockedOnHome, setGoldenSecretUnlockedOnHome] = useState(false);
+  const [goldenEnvelopeOpenedOnHome, setGoldenEnvelopeOpenedOnHome] = useState(
+    Boolean(participant.hasGoldenDetectiveCrown)
+  );
   const [loadingMatch, setLoadingMatch] = useState(false);
   const [gifteeNotInMatch, setGifteeNotInMatch] = useState(false);
   const [matchRetryTick, setMatchRetryTick] = useState(0);
@@ -465,6 +479,46 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
   const activeSantaIdentity =
     previewStage === 'preview-santa' ? DEMO_PREVIEW_SANTA : santaReveal;
 
+  // Check if participant unlocked The 1% Santa Secret (guessed their Santa correctly)
+  useEffect(() => {
+    let active = true;
+    if (!showingSantaIdentityReveal || !activeSantaIdentity) {
+      setGoldenSecretUnlockedOnHome(false);
+      return;
+    }
+
+    const checkSecret = async () => {
+      const rec = await fetchMySantaGuesses(participant.id, event.id, liveMatchedMode);
+      if (!active) return;
+      if (rec && hasCorrectSantaGuess(rec.guesses, activeSantaIdentity)) {
+        setGoldenSecretUnlockedOnHome(true);
+        setGoldenEnvelopeOpenedOnHome(
+          Boolean(rec.goldenEnvelopeOpened || participant.hasGoldenDetectiveCrown)
+        );
+      } else {
+        setGoldenSecretUnlockedOnHome(false);
+      }
+    };
+
+    void checkSecret();
+    const onReset = () => {
+      void checkSecret();
+    };
+    window.addEventListener(WORKSHOP_DATA_RESET_EVENT, onReset);
+    return () => {
+      active = false;
+      window.removeEventListener(WORKSHOP_DATA_RESET_EVENT, onReset);
+    };
+  }, [
+    activeSantaIdentity,
+    activeTab,
+    event.id,
+    liveMatchedMode,
+    participant.hasGoldenDetectiveCrown,
+    participant.id,
+    showingSantaIdentityReveal,
+  ]);
+
   const characterMood =
     gifteeRevealed || santaRevealed
       ? theme === 'funny'
@@ -616,13 +670,24 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
           {/* Participant Status Strip */}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-black/10">
             <div className="flex items-center gap-3">
-              <AvatarGraphic avatarId={participant.avatarId} size={52} className="w-13 h-13 shrink-0" />
+              <AvatarGraphic
+                avatarId={participant.avatarId}
+                size={52}
+                hasGoldenCrown={Boolean(participant.hasGoldenDetectiveCrown)}
+                className="w-13 h-13 shrink-0"
+              />
               <div>
                 <p className={`font-display text-lg font-bold leading-tight ${cfg.cardText}`}>
                   {participant.name}
                 </p>
                 <p className={`text-xs ${cfg.mutedText}`}>
                   {participant.address.city} · {participant.hobbies.length} gift clues saved
+                  {participant.hasGoldenDetectiveCrown ? (
+                    <span className="text-amber-700 font-semibold">
+                      {' '}
+                      · Golden Detective Crown
+                    </span>
+                  ) : null}
                 </p>
               </div>
             </div>
@@ -641,6 +706,22 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
               </button>
             )}
           </div>
+
+          {/* The 1% Santa Secret — Mysterious Golden Envelope surfaced on Home after Reveal */}
+          {goldenSecretUnlockedOnHome && (
+            <GoldenSecretEnvelope
+              compact
+              participantName={participant.name}
+              participantAvatarId={participant.avatarId}
+              alreadyOpened={
+                goldenEnvelopeOpenedOnHome || Boolean(participant.hasGoldenDetectiveCrown)
+              }
+              onOpenEnvelope={() => {
+                setGoldenEnvelopeOpenedOnHome(true);
+                void onOpenGoldenSecretEnvelope?.();
+              }}
+            />
+          )}
 
           {/* Feature 9: Gift Budget Guide Banner */}
           <div
@@ -926,7 +1007,11 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
                   transition={{ repeat: Infinity, duration: 2.8 }}
                   className="rounded-2xl bg-white/80 p-1.5 shadow-md"
                 >
-                  <AvatarGraphic avatarId={participant.avatarId} size={56} />
+                  <AvatarGraphic
+                    avatarId={participant.avatarId}
+                    size={56}
+                    hasGoldenCrown={Boolean(participant.hasGoldenDetectiveCrown)}
+                  />
                 </motion.div>
 
                 <motion.div
@@ -971,180 +1056,255 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
           )}
 
           {/* Live Gift Tracking Status Panel inside the Hub */}
-          {event.deliveryTrackingEnabled && (
-            <div className="rounded-2xl bg-slate-950 text-white border border-white/15 p-4 sm:p-5 space-y-3.5 shadow-md">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-amber-300/20 border border-amber-300/35 text-amber-300 flex items-center justify-center shrink-0">
-                    <Truck className="w-4 h-4" />
+          {event.deliveryTrackingEnabled && (() => {
+            const trackerTheme =
+              theme === 'chocolate'
+                ? {
+                    panel: 'bg-[#f7e7ce]/85 text-[#3d1c06] border-[#cfa375]',
+                    iconBox: 'bg-[#5c2d0c] border-[#3d1c06] text-[#fef3c7]',
+                    subtitle: 'text-[#6b3a19]',
+                    retryBtn:
+                      'bg-[#fffaf2] hover:bg-[#f5e3c6] border border-[#c69563] text-[#3d1c06]',
+                    errorBox: 'bg-rose-50 border-rose-300 text-rose-900',
+                    errorIcon: 'text-rose-600',
+                    innerCard: 'bg-[#fffaf2] border-[#d8b48a]',
+                    incomingLabel: 'text-[#9a3412]',
+                    outgoingLabel: 'text-[#6b3410]',
+                    stepCount: 'text-[#7c4a24]',
+                    title: 'text-[#3d1c06]',
+                    trackBg: 'bg-[#ecd3ad]',
+                    incomingBar: 'from-[#b45309] to-[#f59e0b]',
+                    outgoingBar: 'from-[#6b3410] to-[#d97706]',
+                    noteText: 'text-[#6b3a19]',
+                    primaryCta:
+                      'bg-[#5c2d0c] hover:bg-[#4a2311] text-[#fef3c7] shadow-sm',
+                    secondaryCta: cfg.secondaryBtnClass,
+                    receivedBadge: 'text-emerald-800',
+                    problemBadge: 'text-rose-700',
+                  }
+                : theme === 'funny'
+                  ? {
+                      panel: 'bg-amber-50/90 text-[#431407] border-amber-400',
+                      iconBox: 'bg-pink-600 border-pink-700 text-white',
+                      subtitle: 'text-[#7c2d12]',
+                      retryBtn:
+                        'bg-white hover:bg-amber-100 border border-amber-400 text-[#431407]',
+                      errorBox: 'bg-rose-50 border-rose-300 text-rose-900',
+                      errorIcon: 'text-rose-600',
+                      innerCard: 'bg-[#fffdf7] border-amber-300',
+                      incomingLabel: 'text-pink-700',
+                      outgoingLabel: 'text-amber-800',
+                      stepCount: 'text-[#7c2d12]/80',
+                      title: 'text-[#431407]',
+                      trackBg: 'bg-amber-200/75',
+                      incomingBar: 'from-pink-500 to-amber-500',
+                      outgoingBar: 'from-amber-500 to-teal-500',
+                      noteText: 'text-[#7c2d12]',
+                      primaryCta:
+                        'bg-pink-600 hover:bg-pink-700 text-white shadow-sm',
+                      secondaryCta: cfg.secondaryBtnClass,
+                      receivedBadge: 'text-emerald-800',
+                      problemBadge: 'text-rose-700',
+                    }
+                  : {
+                      panel: 'bg-indigo-50/75 text-indigo-950 border-indigo-200/90',
+                      iconBox: 'bg-rose-100 border-rose-200 text-rose-700',
+                      subtitle: 'text-indigo-900/70',
+                      retryBtn:
+                        'bg-white hover:bg-indigo-50 border border-indigo-200 text-indigo-900',
+                      errorBox: 'bg-rose-50 border-rose-200 text-rose-900',
+                      errorIcon: 'text-rose-600',
+                      innerCard: 'bg-white/95 border-indigo-200/80',
+                      incomingLabel: 'text-rose-700',
+                      outgoingLabel: 'text-indigo-700',
+                      stepCount: 'text-indigo-900/65',
+                      title: 'text-indigo-950',
+                      trackBg: 'bg-indigo-100',
+                      incomingBar: 'from-rose-500 to-amber-500',
+                      outgoingBar: 'from-indigo-500 to-emerald-500',
+                      noteText: 'text-indigo-900/75',
+                      primaryCta:
+                        'bg-rose-600 hover:bg-rose-700 text-white shadow-sm',
+                      secondaryCta: cfg.secondaryBtnClass,
+                      receivedBadge: 'text-emerald-700',
+                      problemBadge: 'text-rose-700',
+                    };
+
+            return (
+              <div className={`rounded-2xl border p-4 sm:p-5 space-y-3.5 shadow-sm transition-colors ${trackerTheme.panel}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${trackerTheme.iconBox}`}>
+                      <Truck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="font-display text-base sm:text-lg font-bold leading-tight">
+                        Live Gift Tracking
+                      </h2>
+                      <p className={`text-[11px] font-medium ${trackerTheme.subtitle}`}>
+                        {liveMatchedMode
+                          ? 'Synced live with Santa’s Delivery Express'
+                          : 'Interactive preview · syncs live once matching runs'}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="font-display text-base sm:text-lg font-bold leading-tight">
-                      Live Gift Tracking
-                    </h2>
-                    <p className="text-[11px] text-sky-200/80">
-                      {liveMatchedMode
-                        ? 'Synced live with Santa’s Delivery Express'
-                        : 'Interactive preview · syncs live once matching runs'}
-                    </p>
-                  </div>
+                  {deliverySyncError && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playPopSound();
+                        setDeliveryRetryTick((n) => n + 1);
+                      }}
+                      className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${trackerTheme.retryBtn}`}
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Retry
+                    </button>
+                  )}
                 </div>
+
                 {deliverySyncError && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playPopSound();
-                      setDeliveryRetryTick((n) => n + 1);
-                    }}
-                    className="min-h-[34px] px-3 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-semibold text-amber-200 inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    Retry
-                  </button>
+                  <div className={`rounded-xl border px-3 py-2 text-xs flex items-center gap-2 ${trackerTheme.errorBox}`}>
+                    <AlertCircle className={`w-4 h-4 shrink-0 ${trackerTheme.errorIcon}`} />
+                    <span>{deliverySyncError}</span>
+                  </div>
                 )}
-              </div>
 
-              {deliverySyncError && (
-                <div className="rounded-xl bg-rose-500/20 border border-rose-300/40 px-3 py-2 text-xs text-rose-100 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-300 shrink-0" />
-                  <span>{deliverySyncError}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Incoming Gift Status Card */}
-                {(() => {
-                  const waitingIncoming = liveMatchedMode && !incomingAssignmentId;
-                  const stageInfo = getDeliveryStageInfo(incomingDelivery?.stage || 'preparing');
-                  const stageIdx = Math.max(
-                    0,
-                    DELIVERY_STAGES.findIndex((s) => s.id === stageInfo.id)
-                  );
-                  const pct =
-                    DELIVERY_STAGES.length > 1
-                      ? ((stageIdx + 1) / DELIVERY_STAGES.length) * 100
-                      : 100;
-                  return (
-                    <div className="rounded-2xl bg-white/10 border border-white/15 p-3.5 flex flex-col justify-between gap-3">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
-                            Incoming Surprise
-                          </span>
-                          {incomingAck?.status === 'received' ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Received
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Incoming Gift Status Card */}
+                  {(() => {
+                    const waitingIncoming = liveMatchedMode && !incomingAssignmentId;
+                    const stageInfo = getDeliveryStageInfo(incomingDelivery?.stage || 'preparing');
+                    const stageIdx = Math.max(
+                      0,
+                      DELIVERY_STAGES.findIndex((s) => s.id === stageInfo.id)
+                    );
+                    const pct =
+                      DELIVERY_STAGES.length > 1
+                        ? ((stageIdx + 1) / DELIVERY_STAGES.length) * 100
+                        : 100;
+                    return (
+                      <div className={`rounded-2xl border p-3.5 flex flex-col justify-between gap-3 shadow-sm ${trackerTheme.innerCard}`}>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[11px] font-bold uppercase tracking-wider ${trackerTheme.incomingLabel}`}>
+                              Incoming Surprise
                             </span>
-                          ) : incomingAck?.status === 'problem' ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-300">
-                              <AlertCircle className="w-3.5 h-3.5" />
-                              Issue Reported
-                            </span>
+                            {incomingAck?.status === 'received' ? (
+                              <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${trackerTheme.receivedBadge}`}>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Received
+                              </span>
+                            ) : incomingAck?.status === 'problem' ? (
+                              <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${trackerTheme.problemBadge}`}>
+                                <AlertCircle className="w-3.5 h-3.5" />
+                                Issue Reported
+                              </span>
+                            ) : (
+                              <span className={`text-[11px] font-mono-tabular font-semibold ${trackerTheme.stepCount}`}>
+                                {waitingIncoming ? '...' : `${stageIdx + 1}/${DELIVERY_STAGES.length}`}
+                              </span>
+                            )}
+                          </div>
+                          <p className={`font-display text-base font-bold ${trackerTheme.title}`}>
+                            {waitingIncoming
+                              ? 'Syncing sleigh channel...'
+                              : `${stageInfo.emoji} ${stageInfo.label}`}
+                          </p>
+                          <div className={`h-1.5 rounded-full overflow-hidden ${trackerTheme.trackBg}`}>
+                            <div
+                              className={`h-full rounded-full bg-gradient-to-r ${trackerTheme.incomingBar} transition-all duration-500`}
+                              style={{ width: waitingIncoming ? '12%' : `${pct}%` }}
+                            />
+                          </div>
+                          {incomingDelivery?.sharedNote ? (
+                            <p className={`text-[11px] italic truncate ${trackerTheme.noteText}`}>
+                              &ldquo;{incomingDelivery.sharedNote}&rdquo;
+                            </p>
                           ) : (
-                            <span className="text-[11px] font-mono-tabular text-sky-200/80">
-                              {waitingIncoming ? '...' : `${stageIdx + 1}/${DELIVERY_STAGES.length}`}
-                            </span>
+                            <p className={`text-[11px] line-clamp-1 ${trackerTheme.noteText}`}>
+                              {stageInfo.recipientMessage}
+                            </p>
                           )}
                         </div>
-                        <p className="font-display text-base font-bold text-white">
-                          {waitingIncoming
-                            ? 'Syncing sleigh channel...'
-                            : `${stageInfo.emoji} ${stageInfo.label}`}
-                        </p>
-                        <div className="h-1.5 rounded-full bg-white/15 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-amber-300 to-emerald-300 transition-all duration-500"
-                            style={{ width: waitingIncoming ? '12%' : `${pct}%` }}
-                          />
-                        </div>
-                        {incomingDelivery?.sharedNote ? (
-                          <p className="text-[11px] text-amber-100/90 italic truncate">
-                            &ldquo;{incomingDelivery.sharedNote}&rdquo;
-                          </p>
-                        ) : (
-                          <p className="text-[11px] text-sky-100/75 line-clamp-1">
-                            {stageInfo.recipientMessage}
-                          </p>
-                        )}
+
+                        <button
+                          type="button"
+                          disabled={waitingIncoming}
+                          onClick={() => {
+                            playPopSound();
+                            jumpToWorkshopFeature('delivery-incoming');
+                          }}
+                          className={`w-full min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${trackerTheme.primaryCta}`}
+                        >
+                          <PackageCheck className="w-3.5 h-3.5" />
+                          Track &amp; Confirm Gift →
+                        </button>
                       </div>
+                    );
+                  })()}
 
-                      <button
-                        type="button"
-                        disabled={waitingIncoming}
-                        onClick={() => {
-                          playPopSound();
-                          jumpToWorkshopFeature('delivery-incoming');
-                        }}
-                        className="w-full min-h-[36px] px-3 py-1.5 rounded-xl bg-amber-300 hover:bg-amber-200 text-slate-950 text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <PackageCheck className="w-3.5 h-3.5" />
-                        Track &amp; Confirm Gift →
-                      </button>
-                    </div>
-                  );
-                })()}
+                  {/* Outgoing Gift Status Card (Sender Mission) */}
+                  {(() => {
+                    const senderReady =
+                      !liveMatchedMode || (gifteeTimer.expired && Boolean(gifteeMatch));
+                    const stageInfo = getDeliveryStageInfo(outgoingDelivery?.stage || 'preparing');
+                    const stageIdx = Math.max(
+                      0,
+                      DELIVERY_STAGES.findIndex((s) => s.id === stageInfo.id)
+                    );
+                    const pct =
+                      DELIVERY_STAGES.length > 1
+                        ? ((stageIdx + 1) / DELIVERY_STAGES.length) * 100
+                        : 100;
+                    return (
+                      <div className={`rounded-2xl border p-3.5 flex flex-col justify-between gap-3 shadow-sm ${trackerTheme.innerCard}`}>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[11px] font-bold uppercase tracking-wider ${trackerTheme.outgoingLabel}`}>
+                              Outgoing Gift Mission
+                            </span>
+                            <span className={`text-[11px] font-mono-tabular font-semibold ${trackerTheme.stepCount}`}>
+                              {senderReady ? `${stageIdx + 1}/${DELIVERY_STAGES.length}` : 'Locked'}
+                            </span>
+                          </div>
+                          <p className={`font-display text-base font-bold truncate ${trackerTheme.title}`}>
+                            {senderReady
+                              ? `${stageInfo.emoji} ${stageInfo.label}`
+                              : '🔒 Unlocks After Giftee Reveal'}
+                          </p>
+                          <div className={`h-1.5 rounded-full overflow-hidden ${trackerTheme.trackBg}`}>
+                            <div
+                              className={`h-full rounded-full bg-gradient-to-r ${trackerTheme.outgoingBar} transition-all duration-500`}
+                              style={{ width: senderReady ? `${pct}%` : '0%' }}
+                            />
+                          </div>
+                          <p className={`text-[11px] truncate ${trackerTheme.noteText}`}>
+                            {senderReady
+                              ? `Sending to ${activeGiftee?.recipientName || 'Your Giftee'}`
+                              : 'Update checkpoints once your giftee is revealed'}
+                          </p>
+                        </div>
 
-                {/* Outgoing Gift Status Card (Sender Mission) */}
-                {(() => {
-                  const senderReady =
-                    !liveMatchedMode || (gifteeTimer.expired && Boolean(gifteeMatch));
-                  const stageInfo = getDeliveryStageInfo(outgoingDelivery?.stage || 'preparing');
-                  const stageIdx = Math.max(
-                    0,
-                    DELIVERY_STAGES.findIndex((s) => s.id === stageInfo.id)
-                  );
-                  const pct =
-                    DELIVERY_STAGES.length > 1
-                      ? ((stageIdx + 1) / DELIVERY_STAGES.length) * 100
-                      : 100;
-                  return (
-                    <div className="rounded-2xl bg-white/10 border border-white/15 p-3.5 flex flex-col justify-between gap-3">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-sky-300">
-                            Outgoing Gift Mission
-                          </span>
-                          <span className="text-[11px] font-mono-tabular text-sky-200/80">
-                            {senderReady ? `${stageIdx + 1}/${DELIVERY_STAGES.length}` : 'Locked'}
-                          </span>
-                        </div>
-                        <p className="font-display text-base font-bold text-white truncate">
-                          {senderReady
-                            ? `${stageInfo.emoji} ${stageInfo.label}`
-                            : '🔒 Unlocks After Giftee Reveal'}
-                        </p>
-                        <div className="h-1.5 rounded-full bg-white/15 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-sky-300 to-emerald-300 transition-all duration-500"
-                            style={{ width: senderReady ? `${pct}%` : '0%' }}
-                          />
-                        </div>
-                        <p className="text-[11px] text-sky-100/75 truncate">
-                          {senderReady
-                            ? `Sending to ${activeGiftee?.recipientName || 'Your Giftee'}`
-                            : 'Update checkpoints once your giftee is revealed'}
-                        </p>
+                        <button
+                          type="button"
+                          disabled={!senderReady}
+                          onClick={() => {
+                            playPopSound();
+                            jumpToWorkshopFeature('delivery-outgoing');
+                          }}
+                          className={`w-full min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${trackerTheme.secondaryCta}`}
+                        >
+                          <Truck className="w-3.5 h-3.5" />
+                          Update Sleigh Status →
+                        </button>
                       </div>
-
-                      <button
-                        type="button"
-                        disabled={!senderReady}
-                        onClick={() => {
-                          playPopSound();
-                          jumpToWorkshopFeature('delivery-outgoing');
-                        }}
-                        className="w-full min-h-[36px] px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 border border-white/20 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
-                      >
-                        <Truck className="w-3.5 h-3.5" />
-                        Update Sleigh Status →
-                      </button>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Interactive Demo Stage Switcher (only shown before live admin matching completes, so reviewers can immediately try Scratch + Shake + FAAAAH!) */}
           {!event.isMatched && (
@@ -1227,6 +1387,7 @@ export const CountdownAndRevealHub: React.FC<CountdownAndRevealHubProps> = ({
               isLiveFirestoreEvent={isLiveFirestoreEvent}
               requestedFeature={requestedWorkshopFeature}
               onClearRequestedFeature={() => setRequestedWorkshopFeature(null)}
+              onOpenGoldenSecretEnvelope={onOpenGoldenSecretEnvelope}
               onTriggerGrandReveal={() => {
                 if (!event.isMatched) {
                   setPreviewStage('preview-giftee');
